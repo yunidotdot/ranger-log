@@ -642,48 +642,80 @@ function parseClaudeSaveFile(text, baseSave) {
 function coerceImportedJson(data, baseSave) {
   const textVersion = JSON.stringify(data, null, 2);
 
-  if (data && typeof data === "object" && (data.profile || data.meta || data.manualUnlocks || data.days || data.presets)) {
+  if (data && typeof data === "object" && (data.profile || data.manualUnlocks || data.days || data.presets)) {
     return normalizeSave(data);
   }
 
-  const character = data.character || data.Character || data.CHARACTER || data.ranger || data.Ranger || {};
-  const stats = data.stats || data.Stats || data.status || data.Status || {};
-  const targets = data.targets || data.Targets || data.dailyTargets || data.DAILY_TARGETS || {};
-  const achievements = data.achievements || data.Achievements || data.unlockedAchievements || data.ACHIEVEMENTS_UNLOCKED || [];
-  const titles = data.titles || data.Titles || data.earnedTitles || data.TITLES_EARNED || [];
-  const milestones = data.milestones || data.Milestones || data.milestoneQuests || data.MILESTONE_QUESTS_COMPLETE || [];
-  const promiseData = data.promise || data.Promise || data.THE_PROMISE || {};
-
-  const getValue = (...keys) => {
-    for (const source of [data, character, stats, targets]) {
-      for (const key of keys) {
-        if (source && source[key] !== undefined && source[key] !== null && source[key] !== "") return source[key];
-      }
-    }
-    return null;
-  };
+  const character = data.character || data.Character || data.ranger || {};
+  const statusMeta = data.meta || data.Meta || {};
+  const carryForward = data.carry_forward || data.carryForward || {};
+  const todaysLog = data.todays_log || data.todaysLog || data.day || {};
+  const totals = todaysLog.totals || {};
+  const activity = todaysLog.activity || {};
+  const workout = todaysLog.workout || {};
+  const promiseData = data.the_promise || data.promise || data.Promise || {};
+  const achievements = data.achievements_unlocked || data.achievements || [];
+  const titles = data.titles_earned || data.titles || [];
+  const milestones = data.milestone_quests_complete || data.milestones || [];
 
   const numberFrom = (value) => {
     if (value === null || value === undefined) return null;
-    const cleaned = String(value).replace(/[^0-9.-]/g, "");
-    if (!cleaned) return null;
-    const parsed = Number(cleaned);
+    const cleaned = String(value).replaceAll(",", "").replaceAll("lbs", "").replaceAll("lb", "").replaceAll("XP", "").replaceAll("xp", "").trim();
+    const parsed = parseFloat(cleaned);
     return Number.isFinite(parsed) ? parsed : null;
   };
 
-  const textBlob = `${textVersion} ${Array.isArray(achievements) ? achievements.join(" ") : JSON.stringify(achievements)} ${Array.isArray(titles) ? titles.join(" ") : JSON.stringify(titles)} ${Array.isArray(milestones) ? milestones.join(" ") : JSON.stringify(milestones)}`.toLowerCase();
+  const textBlob = [textVersion, achievements, titles, milestones].map((item) => Array.isArray(item) ? item.join(" ") : JSON.stringify(item || "")).join(" ").toLowerCase();
 
-  const importedXp = numberFrom(getValue("importedXp", "totalXp", "totalXP", "xp", "XP", "Total XP", "TotalXP"));
-  const currentDay = numberFrom(getValue("currentDay", "day", "Day", "current_day"));
-  const currentWeight = numberFrom(getValue("currentWeight", "weight", "Current weight", "current_weight"));
-  const startWeight = numberFrom(getValue("startWeight", "startingWeight", "baseline", "Official baseline", "officialBaseline", "start_weight"));
-  const goalWeight = numberFrom(getValue("goalWeight", "goal", "Goal", "goal_weight"));
-  const age = numberFrom(getValue("age", "Age"));
-  const height = getValue("height", "Height") || baseSave.profile.height;
-  const name = getValue("name", "Name") || baseSave.profile.name;
-  const className = getValue("className", "class", "Class") || baseSave.profile.className;
-  const path = getValue("path", "Path") || baseSave.profile.path;
-  const nextWorkoutRaw = getValue("nextWorkout", "next_workout", "Next workout", "workoutNext");
+  const importedXp = numberFrom(carryForward.total_xp_end_of_day) ?? numberFrom(character.total_xp) ?? numberFrom(data.total_xp) ?? baseSave.profile.importedXp;
+  const currentDay = numberFrom(statusMeta.day_number) ?? numberFrom(todaysLog.day_number) ?? baseSave.meta.currentDay;
+  const currentWeight = numberFrom(character.weight_current_lbs) ?? numberFrom(character.currentWeight) ?? baseSave.profile.currentWeight;
+  const startWeight = numberFrom(character.weight_baseline_lbs) ?? numberFrom(character.startWeight) ?? baseSave.profile.startWeight;
+  const goalWeight = numberFrom(character.weight_goal_lbs) ?? numberFrom(character.goalWeight) ?? baseSave.profile.goalWeight;
+  const age = numberFrom(character.age) ?? baseSave.profile.age;
+  const nextWorkoutRaw = carryForward.next_workout || character.next_workout || baseSave.meta.nextWorkout;
+  const importedDate = statusMeta.date || todaysLog.date || data.date || baseSave.meta.lastUpdated || todayKey();
+
+  const meals = todaysLog.meals || {};
+  const foods = [];
+  Object.keys(meals).forEach((mealName) => {
+    const meal = meals[mealName] || {};
+    const items = meal.items || [];
+    items.forEach((item) => {
+      foods.push({
+        name: item.name || mealName,
+        calories: numberFrom(item.calories_kcal) ?? 0,
+        protein: numberFrom(item.protein_g) ?? 0,
+      });
+    });
+  });
+
+  const notes = [];
+  if (activity.notes) notes.push(activity.notes);
+  if (todaysLog.meals && todaysLog.meals.lunch && todaysLog.meals.lunch.note) notes.push(todaysLog.meals.lunch.note);
+  if (data.workout_plan && data.workout_plan.notes) notes.push(data.workout_plan.notes);
+  if (carryForward.note) notes.push(carryForward.note);
+  if (carryForward.meal_prep_note) notes.push(carryForward.meal_prep_note);
+  if (carryForward.stir_fry_note) notes.push(carryForward.stir_fry_note);
+
+  let workoutDay = String(nextWorkoutRaw || "Day A");
+  if (workout.day) workoutDay = "Day " + String(workout.day).replace("Day", "").replace("day", "").trim().toUpperCase();
+
+  const snapshotDay = todaysLog.date ? [{
+    date: todaysLog.date,
+    weight: currentWeight,
+    calories: numberFrom(totals.calories_consumed_kcal) ?? 0,
+    protein: numberFrom(totals.protein_g) ?? 0,
+    water: numberFrom(totals.water_oz) ?? 0,
+    steps: numberFrom(activity.steps) ?? 0,
+    activeMinutes: numberFrom(activity.active_minutes) ?? 0,
+    caloriesBurned: numberFrom(totals.calories_burned_kcal) ?? numberFrom(activity.calories_burned_kcal) ?? 0,
+    workoutDay,
+    workoutComplete: !!workout.complete,
+    notes,
+    foods,
+    snapshot: true,
+  }] : [];
 
   const manualUnlocks = {
     ...baseSave.manualUnlocks,
@@ -706,44 +738,43 @@ function coerceImportedJson(data, baseSave) {
     pushupTestPassed: textBlob.includes("pushup test passed") || baseSave.manualUnlocks.pushupTestPassed,
   };
 
+  const classText = character.class || character.className || baseSave.profile.className;
+  const classParts = String(classText).split("·").map((part) => part.trim()).filter(Boolean);
+
   const promise = {
     ...baseSave.promise,
-    title: promiseData.title || promiseData.name || baseSave.promise.title,
-    subtitle: promiseData.subtitle || promiseData.rarity || baseSave.promise.subtitle,
-    flavor: promiseData.flavor || promiseData.flavorText || promiseData.quote || baseSave.promise.flavor,
-    made: promiseData.made || promiseData.date || baseSave.promise.made,
-    by: promiseData.by || baseSave.promise.by,
+    title: promiseData.name || promiseData.title || baseSave.promise.title,
+    subtitle: promiseData.rarity || promiseData.subtitle || baseSave.promise.subtitle,
+    flavor: promiseData.flavor_text || promiseData.flavor || promiseData.quote || baseSave.promise.flavor,
+    made: promiseData.made_on || promiseData.made || promiseData.date || baseSave.promise.made,
+    by: promiseData.made_by || promiseData.by || baseSave.promise.by,
     for: promiseData.for || promiseData.recipient || baseSave.promise.for,
   };
-
-  let nextWorkout = baseSave.meta.nextWorkout;
-  if (nextWorkoutRaw) {
-    nextWorkout = String(nextWorkoutRaw).replace("DAY", "Day").replace("day", "Day");
-  }
 
   return normalizeSave({
     ...baseSave,
     profile: {
       ...baseSave.profile,
-      name,
-      className,
-      path,
-      age: age ?? baseSave.profile.age,
-      height,
-      startWeight: startWeight ?? baseSave.profile.startWeight,
-      currentWeight: currentWeight ?? baseSave.profile.currentWeight,
-      goalWeight: goalWeight ?? baseSave.profile.goalWeight,
-      importedXp: importedXp ?? baseSave.profile.importedXp,
-      importedLabel: importedXp !== null ? "Imported JSON snapshot" : baseSave.profile.importedLabel,
+      name: character.name || baseSave.profile.name,
+      className: classParts[0] || classText || baseSave.profile.className,
+      path: classParts[1] || baseSave.profile.path,
+      age,
+      height: character.height || baseSave.profile.height,
+      startWeight,
+      currentWeight,
+      goalWeight,
+      importedXp,
+      importedLabel: "Imported JSON snapshot through " + importedDate,
     },
     meta: {
       ...baseSave.meta,
-      currentDay: currentDay ?? baseSave.meta.currentDay,
-      lastUpdated: data.date || data.Date || data.lastUpdated || data.last_updated || baseSave.meta.lastUpdated || todayKey(),
-      nextWorkout,
+      currentDay,
+      lastUpdated: importedDate,
+      nextWorkout: String(nextWorkoutRaw || baseSave.meta.nextWorkout).replace("day", "Day").replace("DAY", "Day"),
     },
     manualUnlocks,
     promise,
+    days: snapshotDay,
     importedNotes: textVersion,
   });
 }
