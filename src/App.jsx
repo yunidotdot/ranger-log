@@ -639,11 +639,120 @@ function parseClaudeSaveFile(text, baseSave) {
   });
 }
 
+function coerceImportedJson(data, baseSave) {
+  const textVersion = JSON.stringify(data, null, 2);
+
+  if (data && typeof data === "object" && (data.profile || data.meta || data.manualUnlocks || data.days || data.presets)) {
+    return normalizeSave(data);
+  }
+
+  const character = data.character || data.Character || data.CHARACTER || data.ranger || data.Ranger || {};
+  const stats = data.stats || data.Stats || data.status || data.Status || {};
+  const targets = data.targets || data.Targets || data.dailyTargets || data.DAILY_TARGETS || {};
+  const achievements = data.achievements || data.Achievements || data.unlockedAchievements || data.ACHIEVEMENTS_UNLOCKED || [];
+  const titles = data.titles || data.Titles || data.earnedTitles || data.TITLES_EARNED || [];
+  const milestones = data.milestones || data.Milestones || data.milestoneQuests || data.MILESTONE_QUESTS_COMPLETE || [];
+  const promiseData = data.promise || data.Promise || data.THE_PROMISE || {};
+
+  const getValue = (...keys) => {
+    for (const source of [data, character, stats, targets]) {
+      for (const key of keys) {
+        if (source && source[key] !== undefined && source[key] !== null && source[key] !== "") return source[key];
+      }
+    }
+    return null;
+  };
+
+  const numberFrom = (value) => {
+    if (value === null || value === undefined) return null;
+    const cleaned = String(value).replace(/[^0-9.-]/g, "");
+    if (!cleaned) return null;
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const textBlob = `${textVersion} ${Array.isArray(achievements) ? achievements.join(" ") : JSON.stringify(achievements)} ${Array.isArray(titles) ? titles.join(" ") : JSON.stringify(titles)} ${Array.isArray(milestones) ? milestones.join(" ") : JSON.stringify(milestones)}`.toLowerCase();
+
+  const importedXp = numberFrom(getValue("importedXp", "totalXp", "totalXP", "xp", "XP", "Total XP", "TotalXP"));
+  const currentDay = numberFrom(getValue("currentDay", "day", "Day", "current_day"));
+  const currentWeight = numberFrom(getValue("currentWeight", "weight", "Current weight", "current_weight"));
+  const startWeight = numberFrom(getValue("startWeight", "startingWeight", "baseline", "Official baseline", "officialBaseline", "start_weight"));
+  const goalWeight = numberFrom(getValue("goalWeight", "goal", "Goal", "goal_weight"));
+  const age = numberFrom(getValue("age", "Age"));
+  const height = getValue("height", "Height") || baseSave.profile.height;
+  const name = getValue("name", "Name") || baseSave.profile.name;
+  const className = getValue("className", "class", "Class") || baseSave.profile.className;
+  const path = getValue("path", "Path") || baseSave.profile.path;
+  const nextWorkoutRaw = getValue("nextWorkout", "next_workout", "Next workout", "workoutNext");
+
+  const manualUnlocks = {
+    ...baseSave.manualUnlocks,
+    firstEntry: textBlob.includes("first entry") || baseSave.manualUnlocks.firstEntry,
+    trailBlazer: textBlob.includes("trail blazer") || baseSave.manualUnlocks.trailBlazer,
+    firstWeighIn: textBlob.includes("first blood") || textBlob.includes("weigh-in") || baseSave.manualUnlocks.firstWeighIn,
+    firstWorkout: textBlob.includes("first blood (workout)") || textBlob.includes("first workout") || baseSave.manualUnlocks.firstWorkout,
+    firstPlank: textBlob.includes("plank initiate") || baseSave.manualUnlocks.firstPlank,
+    switchedTo2x15: textBlob.includes("the switch") || textBlob.includes("2×15") || textBlob.includes("2x15") || baseSave.manualUnlocks.switchedTo2x15,
+    firstProteinGoal: textBlob.includes("meat & iron") || textBlob.includes("meat and iron") || baseSave.manualUnlocks.firstProteinGoal,
+    aboveTheFloor: textBlob.includes("above the floor") || baseSave.manualUnlocks.aboveTheFloor,
+    overdrive: textBlob.includes("overdrive") || baseSave.manualUnlocks.overdrive,
+    firstMealPrep: textBlob.includes("ranger's ration") || textBlob.includes("first meal prep") || baseSave.manualUnlocks.firstMealPrep,
+    firstWaterGoal: textBlob.includes("the well") || baseSave.manualUnlocks.firstWaterGoal,
+    monsoon: textBlob.includes("monsoon") || baseSave.manualUnlocks.monsoon,
+    stepSeeker: textBlob.includes("step seeker") || baseSave.manualUnlocks.stepSeeker,
+    weekendScout: textBlob.includes("weekend scout") || baseSave.manualUnlocks.weekendScout,
+    firstCleanWeekend: textBlob.includes("first clean weekend") || baseSave.manualUnlocks.firstCleanWeekend,
+    airFryerBatch: textBlob.includes("air fryer apprentice") || textBlob.includes("air fryer chicken") || baseSave.manualUnlocks.airFryerBatch,
+    pushupTestPassed: textBlob.includes("pushup test passed") || baseSave.manualUnlocks.pushupTestPassed,
+  };
+
+  const promise = {
+    ...baseSave.promise,
+    title: promiseData.title || promiseData.name || baseSave.promise.title,
+    subtitle: promiseData.subtitle || promiseData.rarity || baseSave.promise.subtitle,
+    flavor: promiseData.flavor || promiseData.flavorText || promiseData.quote || baseSave.promise.flavor,
+    made: promiseData.made || promiseData.date || baseSave.promise.made,
+    by: promiseData.by || baseSave.promise.by,
+    for: promiseData.for || promiseData.recipient || baseSave.promise.for,
+  };
+
+  let nextWorkout = baseSave.meta.nextWorkout;
+  if (nextWorkoutRaw) {
+    nextWorkout = String(nextWorkoutRaw).replace("DAY", "Day").replace("day", "Day");
+  }
+
+  return normalizeSave({
+    ...baseSave,
+    profile: {
+      ...baseSave.profile,
+      name,
+      className,
+      path,
+      age: age ?? baseSave.profile.age,
+      height,
+      startWeight: startWeight ?? baseSave.profile.startWeight,
+      currentWeight: currentWeight ?? baseSave.profile.currentWeight,
+      goalWeight: goalWeight ?? baseSave.profile.goalWeight,
+      importedXp: importedXp ?? baseSave.profile.importedXp,
+      importedLabel: importedXp !== null ? "Imported JSON snapshot" : baseSave.profile.importedLabel,
+    },
+    meta: {
+      ...baseSave.meta,
+      currentDay: currentDay ?? baseSave.meta.currentDay,
+      lastUpdated: data.date || data.Date || data.lastUpdated || data.last_updated || baseSave.meta.lastUpdated || todayKey(),
+      nextWorkout,
+    },
+    manualUnlocks,
+    promise,
+    importedNotes: textVersion,
+  });
+}
+
 function parseImportedText(text, baseSave) {
   const trimmed = text.trim();
   if (!trimmed) throw new Error("The import text was empty.");
   try {
-    return normalizeSave(JSON.parse(trimmed));
+    return coerceImportedJson(JSON.parse(trimmed), baseSave);
   } catch {
     return parseClaudeSaveFile(trimmed, baseSave);
   }
