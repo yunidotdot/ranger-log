@@ -642,9 +642,22 @@ function parseClaudeSaveFile(text, baseSave) {
 function coerceImportedJson(data, baseSave) {
   const textVersion = JSON.stringify(data, null, 2);
 
-  if (data && typeof data === "object" && (data.profile || data.manualUnlocks || data.days || data.presets)) {
-    return normalizeSave(data);
-  }
+const looksLikeClaudeSnapshot = !!(data && (
+  data.character ||
+  data.todays_log ||
+  data.carry_forward ||
+  data.the_promise ||
+  data.achievements_unlocked
+));
+
+if (!looksLikeClaudeSnapshot && data && typeof data === "object" && (
+  data.profile ||
+  data.manualUnlocks ||
+  data.days ||
+  data.presets
+)) {
+  return normalizeSave(data);
+}
 
   const character = data.character || data.Character || data.ranger || {};
   const statusMeta = data.meta || data.Meta || {};
