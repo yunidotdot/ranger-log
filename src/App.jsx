@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Activity,
@@ -18,61 +18,65 @@ import {
   Shield,
   Star,
   Swords,
-  Trophy,
   Trash2,
+  Trophy,
   Upload,
   Utensils,
   Weight,
 } from "lucide-react";
 
-const STORAGE_KEY = "ranger-log-save-v2";
+const STORAGE_KEY = "ranger-log-save-v3";
 
-const DEFAULT_SAVE = {
+const TEMPLATE_SAVE = {
   profile: {
     name: "The Ranger",
     className: "Endurance Specialist",
     path: "Path of the Iron Will",
-    age: 31,
-    height: "5'11\"",
-    startWeight: 254.6,
-    currentWeight: 252.0,
-    goalWeight: 180,
-    importedXp: 4025,
-    importedLabel: "Claude snapshot through 2026-05-25",
+    age: null,
+    height: "",
+    startWeight: null,
+    currentWeight: null,
+    goalWeight: null,
+    importedXp: 0,
+    importedLabel: "No imported snapshot yet",
   },
   meta: {
-    currentDay: 12,
-    lastUpdated: "2026-05-25",
-    nextWorkout: "Day B",
+    currentDay: 1,
+    lastUpdated: null,
+    nextWorkout: "Day A",
   },
   manualUnlocks: {
-    firstEntry: true,
-    trailBlazer: true,
-    firstWeighIn: true,
-    firstWorkout: true,
-    firstPlank: true,
-    switchedTo2x15: true,
-    firstProteinGoal: true,
-    aboveTheFloor: true,
-    overdrive: true,
-    firstMealPrep: true,
-    firstWaterGoal: true,
-    monsoon: true,
-    stepSeeker: true,
-    weekendScout: true,
-    firstCleanWeekend: true,
-    airFryerBatch: true,
+    firstEntry: false,
+    trailBlazer: false,
+    firstWeighIn: false,
+    firstWorkout: false,
+    firstPlank: false,
+    switchedTo2x15: false,
+    firstProteinGoal: false,
+    aboveTheFloor: false,
+    overdrive: false,
+    firstMealPrep: false,
+    firstWaterGoal: false,
+    monsoon: false,
+    stepSeeker: false,
+    weekendScout: false,
+    firstCleanWeekend: false,
+    airFryerBatch: false,
     standardizedPortions: false,
-    pushupTestPassed: true,
+    pushupTestPassed: false,
   },
-  presets: [
-    { id: "protein-shake", name: "Protein Shake", calories: 160, protein: 30, aliases: ["protein shake", "shake"] },
-    { id: "buffalo-chicken-bowl", name: "Buffalo Chicken Bowl", calories: 720, protein: 60, aliases: ["buffalo chicken bowl", "chicken rice buffalo", "meal prep chicken rice"] },
-    { id: "week-3-meal-prep", name: "Week 3 Meal Prep", calories: 700, protein: 65, aliases: ["week 3 meal prep", "air fryer chicken", "chicken breast rice broccoli cheese", "chicken rice broccoli cheese green onion"] },
-    { id: "chicken-rice", name: "Chicken and Rice", calories: 650, protein: 55, aliases: ["chicken and rice", "chicken rice", "rice and chicken"] },
-  ],
+  presets: [],
   days: [],
-  importedNotes: "RANGER SAVE FILE — May 25, 2026 snapshot imported as authoritative baseline.",
+  importedNotes: "",
+  promise: {
+    title: "Final Promise",
+    subtitle: "Legendary · Hidden · Final",
+    flavor: "A final promise, locked until the journey is complete.",
+    made: "",
+    by: "The Ranger",
+    for: "",
+    locked: true,
+  },
 };
 
 const levels = [
@@ -154,31 +158,32 @@ function safeIsoDate(input, fallback = todayKey()) {
 }
 
 function formatDate(date) {
+  if (!date) return "No snapshot imported";
   const d = new Date(`${date}T12:00:00`);
   return d.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+}
+
+function normalizeSave(save) {
+  return {
+    ...TEMPLATE_SAVE,
+    ...save,
+    profile: { ...TEMPLATE_SAVE.profile, ...(save?.profile || {}) },
+    meta: { ...TEMPLATE_SAVE.meta, ...(save?.meta || {}) },
+    manualUnlocks: { ...TEMPLATE_SAVE.manualUnlocks, ...(save?.manualUnlocks || {}) },
+    presets: save?.presets || TEMPLATE_SAVE.presets,
+    days: save?.days || [],
+    promise: { ...TEMPLATE_SAVE.promise, ...(save?.promise || {}) },
+  };
 }
 
 function readSave() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SAVE;
-    const parsed = JSON.parse(raw);
-    return normalizeSave(parsed);
+    if (!raw) return TEMPLATE_SAVE;
+    return normalizeSave(JSON.parse(raw));
   } catch {
-    return DEFAULT_SAVE;
+    return TEMPLATE_SAVE;
   }
-}
-
-function normalizeSave(save) {
-  return {
-    ...DEFAULT_SAVE,
-    ...save,
-    profile: { ...DEFAULT_SAVE.profile, ...(save?.profile || {}) },
-    meta: { ...DEFAULT_SAVE.meta, ...(save?.meta || {}) },
-    manualUnlocks: { ...DEFAULT_SAVE.manualUnlocks, ...(save?.manualUnlocks || {}) },
-    presets: save?.presets || DEFAULT_SAVE.presets,
-    days: save?.days || [],
-  };
 }
 
 function writeSave(save) {
@@ -249,11 +254,11 @@ function clampPct(value, max) {
 function lowestWeight(save) {
   const logged = save.days.map((d) => d.weight).filter(Boolean);
   const all = [save.profile.currentWeight, ...logged].filter(Boolean);
-  return all.length ? Math.min(...all) : save.profile.startWeight;
+  return all.length ? Math.min(...all) : null;
 }
 
 function currentWeight(save, today) {
-  return today.weight || sortedDays(save).map((d) => d.weight).filter(Boolean).at(-1) || save.profile.currentWeight || save.profile.startWeight;
+  return today.weight || sortedDays(save).map((d) => d.weight).filter(Boolean).at(-1) || save.profile.currentWeight || null;
 }
 
 function longestLoggedStreak(days) {
@@ -274,53 +279,374 @@ function longestLoggedStreak(days) {
 function deriveAchievements(save) {
   const days = save.days || [];
   const m = save.manualUnlocks || {};
-  const loggedCount = days.filter((d) => dayXp(d).logged).length;
+  const loggedDays = days.filter((d) => dayXp(d).logged);
+  const loggedCount = loggedDays.length;
   const perfectCount = days.filter((d) => dayXp(d).perfect).length;
   const waterCount = days.filter((d) => (d.water || 0) >= 80).length;
   const proteinCount = days.filter((d) => (d.protein || 0) >= 150).length;
   const workoutCount = days.filter((d) => d.workoutComplete).length;
   const maxStreak = longestLoggedStreak(days);
   const low = lowestWeight(save);
+  const hasWeight = low !== null;
+  const start = save.profile.startWeight;
+  const poundsLost = start !== null && hasWeight ? start - low : 0;
+  const totalWater = days.reduce((sum, d) => sum + (Number(d.water) || 0), 0);
+  const totalProtein = days.reduce((sum, d) => sum + (Number(d.protein) || 0), 0);
+  const totalSteps = days.reduce((sum, d) => sum + (Number(d.steps) || 0), 0);
+  const totalBurned = days.reduce((sum, d) => sum + (Number(d.caloriesBurned) || 0), 0);
   const overdrive = days.some((d) => (d.protein || 0) >= 200);
+  const titanProtein = days.some((d) => (d.protein || 0) >= 225);
   const monsoon = days.some((d) => (d.water || 0) >= 100);
-  const roadRanger = days.some((d) => (d.steps || 0) >= 10000);
+  const floodGate = days.some((d) => (d.water || 0) >= 120);
   const stepSeeker = days.some((d) => (d.steps || 0) >= 5000);
-  const floorGuardian = days.filter((d) => (d.calories || 0) >= 1800).length >= 14;
-  const deadCenter = days.filter((d) => (d.calories || 0) >= 2000 && (d.calories || 0) <= 2400).length >= 5;
+  const roadRanger = days.some((d) => (d.steps || 0) >= 10000);
+  const stepChampion = days.some((d) => (d.steps || 0) >= 15000);
+  const longMarch = days.some((d) => (d.steps || 0) >= 20000);
+  const floorDays = days.filter((d) => (d.calories || 0) >= 1800).length;
+  const targetDays = days.filter((d) => (d.calories || 0) >= 2000 && (d.calories || 0) <= 2400).length;
+  const noWorkoutButLogged = days.some((d) => dayXp(d).logged && !d.workoutComplete && (d.steps || 0) >= 5000);
+  const importUsed = !!save.importedNotes || (save.profile.importedXp || 0) > 0;
+  const presetsUsed = (save.presets || []).length > 0;
+  const presetCount = (save.presets || []).length;
+  const quickLogs = days.filter((d) => (d.notes || []).length > 0).length;
+  const notesText = days.flatMap((d) => d.notes || []).join(" ").toLowerCase();
+  const bikeMentioned = notesText.includes("bike") || notesText.includes("cycling") || notesText.includes("biked");
+  const walkMentioned = notesText.includes("walk") || notesText.includes("walking");
+  const lateNightLogged = /late night|4am|5am|night owl|stayed up/i.test(notesText);
+  const airFryerMentioned = notesText.includes("air fryer") || m.airFryerBatch;
+  const mealPrepMentioned = notesText.includes("meal prep") || m.firstMealPrep;
+  const buffaloMentioned = notesText.includes("buffalo");
+  const cleanWeekend = m.weekendScout || m.firstCleanWeekend;
 
   return [
-    { name: "Consistency", items: [["📜 First Entry", "Day 1 logged", m.firstEntry || loggedCount >= 1], ["⚔️ Trail Blazer", "7 days logged", m.trailBlazer || loggedCount >= 7], ["🗓️ Fortnight March", "14 days logged", loggedCount >= 14], ["🌙 Month of Moons", "30 days logged", loggedCount >= 30], ["🌿 Season's End", "60 days logged", loggedCount >= 60], ["👑 The Chronicler", "365 days logged", loggedCount >= 365]] },
-    { name: "Streaks", items: [["🔥 Kindling", "3-day streak", maxStreak >= 3], ["🔥🔥 Burning", "7-day streak", maxStreak >= 7], ["⚡ Lightning Rod", "14-day streak", maxStreak >= 14], ["🌋 Unstoppable", "30-day streak", maxStreak >= 30], ["🛡️ Iron Will", "5 perfect days", perfectCount >= 5], ["💎 Diamond Discipline", "10 perfect days", perfectCount >= 10]] },
-    { name: "Weight Milestones", items: [["🏹 First Blood", "First weigh-in", m.firstWeighIn], ["🌲 Into the Woods", "Reach 250 lbs", low <= 250], ["⚡ Danger Zone", "Push past 247 lbs", low < 247], ["🦅 Highland Ranger", "Reach 240 lbs", low <= 240], ["🗻 Above the Clouds", "Reach 230 lbs", low <= 230], ["🏔️ Summit Seeker", "Reach 220 lbs", low <= 220], ["🌟 Ranger Elite", "Reach 200 lbs", low <= 200], ["👑 Ranger's Oath", "Reach 180 lbs", low <= 180], ["🪄 50 Pounds Gone", "Lose 50 lbs total", save.profile.startWeight - low >= 50]] },
-    { name: "Nutrition", items: [["🍖 Meat & Iron", "First protein goal hit", m.firstProteinGoal || proteinCount >= 1], ["🥩 Carnivore's Path", "Protein goal 7 days", proteinCount >= 7], ["💪 Muscle Keeper", "Protein goal 30 days", proteinCount >= 30], ["🍱 Ranger's Ration", "First meal prep batch", m.firstMealPrep], ["🍗 Air Fryer Apprentice", "First air fryer batch", m.airFryerBatch], ["📐 Precise Portions", "Measure rice 7 days", m.standardizedPortions], ["🚫 Floor Guardian", "Never below 1,800 for 14 days", floorGuardian], ["💯 Overdrive", "Hit 200g protein in a day", m.overdrive || overdrive], ["🌡️ Above the Floor", "Stay above 1,800 for 5 days", m.aboveTheFloor || days.filter((d) => (d.calories || 0) >= 1800).length >= 5], ["🎯 Dead Center", "Hit 2,000–2,400 exactly 5 days", deadCenter]] },
-    { name: "Hydration", items: [["💧 First Spring", "Hit 80 oz once", m.firstWaterGoal || waterCount >= 1], ["🌊 The Well", "First 80 oz day", m.firstWaterGoal || waterCount >= 1], ["🏞️ River Ranger", "Water goal 7 days", waterCount >= 7], ["🌧️ Monsoon", "Hit 100 oz in a day", m.monsoon || monsoon], ["🧊 Ice and Iron", "Water goal 30 days", waterCount >= 30]] },
-    { name: "Fitness", items: [["🥊 First Blood", "First workout done", m.firstWorkout || workoutCount >= 1], ["🏋️ 5 Battles Won", "5 workouts complete", workoutCount >= 5], ["⚔️ 10 Battles Won", "10 workouts complete", workoutCount >= 10], ["🧱 Plank Initiate", "First plank held", m.firstPlank], ["🚶 Step Seeker", "Hit 5,000 steps", m.stepSeeker || stepSeeker], ["🏃 Road Ranger", "Hit 10,000 steps", roadRanger], ["🔄 The Switch", "Moved to 2×15 · 15lb", m.switchedTo2x15], ["💪 Pushup Test", "1×10 passed, not in regime yet", m.pushupTestPassed]] },
-    { name: "Weekend Warrior", items: [["🏕️ Weekend Scout", "First clean weekend", m.weekendScout || m.firstCleanWeekend], ["🌄 Saturday Slayer", "3 clean Saturdays", false], ["🌇 The Long Weekend", "3 clean full weekends", false], ["🗺️ No Man's Land", "Weekend plan 5 times", false], ["🌙 Night Owl Tamed", "Log food despite late night", false]] },
-    { name: "Hidden", items: [["❓ ???", "Hidden · keep going", false, true], ["❓ ???", "Hidden · keep going", false, true], ["❓ ???", "Hidden · keep going", false, true], ["❓ ???", "Hidden · keep going", false, true], ["❓ ???", "Hidden · keep going", false, true], ["❓ ???", "Hidden · keep going", false, true]] },
+    {
+      name: "Consistency",
+      items: [
+        ["📜 First Entry", "Day 1 logged", m.firstEntry || loggedCount >= 1],
+        ["🔥 Kindling Page", "3 days logged", loggedCount >= 3],
+        ["⚔️ Trail Blazer", "7 days logged", m.trailBlazer || loggedCount >= 7],
+        ["🗓️ Fortnight March", "14 days logged", loggedCount >= 14],
+        ["🌙 Month of Moons", "30 days logged", loggedCount >= 30],
+        ["🧭 Six-Week Scout", "45 days logged", loggedCount >= 45],
+        ["🌿 Season's End", "60 days logged", loggedCount >= 60],
+        ["🌳 Ancient Grove", "90 days logged", loggedCount >= 90],
+        ["🏕️ Long Camper", "120 days logged", loggedCount >= 120],
+        ["🦅 Eagle's Watch", "180 days logged", loggedCount >= 180],
+        ["📚 Half-Year Archive", "200 days logged", loggedCount >= 200],
+        ["🏛️ Ranger Archive", "250 days logged", loggedCount >= 250],
+        ["👑 The Chronicler", "365 days logged", loggedCount >= 365],
+      ],
+    },
+    {
+      name: "Streaks",
+      items: [
+        ["🔥 Kindling", "3-day streak", maxStreak >= 3],
+        ["🔥🔥 Burning", "7-day streak", maxStreak >= 7],
+        ["⚡ Lightning Rod", "14-day streak", maxStreak >= 14],
+        ["🌋 Unstoppable", "30-day streak", maxStreak >= 30],
+        ["☀️ Eternal Flame", "60-day streak", maxStreak >= 60],
+        ["🌌 Starlit March", "90-day streak", maxStreak >= 90],
+        ["🛡️ Iron Will", "5 perfect days", perfectCount >= 5],
+        ["💎 Diamond Discipline", "10 perfect days", perfectCount >= 10],
+        ["🌟 Legendary", "30 perfect days", perfectCount >= 30],
+        ["👑 Perfect Oath", "60 perfect days", perfectCount >= 60],
+        ["🕊️ Untouched Flame", "90 perfect days", perfectCount >= 90],
+      ],
+    },
+    {
+      name: "Weight Milestones",
+      items: [
+        ["🏹 First Blood", "First weigh-in", m.firstWeighIn],
+        ["🌲 Into the Woods", "Reach 250 lbs", hasWeight && low <= 250],
+        ["⚡ Danger Zone", "Push past 247 lbs", hasWeight && low < 247],
+        ["🦅 Highland Ranger", "Reach 240 lbs", hasWeight && low <= 240],
+        ["🗻 Above the Clouds", "Reach 230 lbs", hasWeight && low <= 230],
+        ["🏔️ Summit Seeker", "Reach 220 lbs", hasWeight && low <= 220],
+        ["🌊 Breaking Wave", "Reach 210 lbs", hasWeight && low <= 210],
+        ["🌟 Ranger Elite", "Reach 200 lbs", hasWeight && low <= 200],
+        ["💫 The Final Mile", "Reach 190 lbs", hasWeight && low <= 190],
+        ["👑 Ranger's Oath", "Reach 180 lbs", hasWeight && low <= 180],
+      ],
+    },
+    {
+      name: "Weight Loss Totals",
+      items: [
+        ["🪶 First Feather", "Lose 5 lbs total", poundsLost >= 5],
+        ["🪨 Ten Pounds Down", "Lose 10 lbs total", poundsLost >= 10],
+        ["🧱 Stonebreaker", "Lose 20 lbs total", poundsLost >= 20],
+        ["⚒️ Iron Cut", "Lose 30 lbs total", poundsLost >= 30],
+        ["🛡️ Forty Pounds Forged", "Lose 40 lbs total", poundsLost >= 40],
+        ["🪄 50 Pounds Gone", "Lose 50 lbs total", poundsLost >= 50],
+        ["🌌 Void Step", "Lose 60 lbs total", poundsLost >= 60],
+        ["👑 Final Cut", "Lose 70 lbs total", poundsLost >= 70],
+        ["⭐ Oathbound Body", "Lose 74+ lbs total", poundsLost >= 74],
+      ],
+    },
+    {
+      name: "Nutrition",
+      items: [
+        ["🍖 Meat & Iron", "First protein goal hit", m.firstProteinGoal || proteinCount >= 1],
+        ["🥩 Carnivore's Path", "Protein goal 7 days", proteinCount >= 7],
+        ["💪 Muscle Keeper", "Protein goal 30 days", proteinCount >= 30],
+        ["🦾 Protein Bulwark", "Protein goal 60 days", proteinCount >= 60],
+        ["🧬 Lean Code", "Protein goal 90 days", proteinCount >= 90],
+        ["🍱 Ranger's Ration", "First meal prep batch", m.firstMealPrep],
+        ["🏺 Provision Master", "Meal prep rhythm established", m.firstMealPrep && loggedCount >= 14],
+        ["🍗 Air Fryer Apprentice", "First air fryer batch", m.airFryerBatch || airFryerMentioned],
+        ["📐 Precise Portions", "Measured portions milestone", m.standardizedPortions],
+        ["🚫 Floor Guardian", "Never below 1,800 for 14 logged days", floorDays >= 14],
+        ["🌡️ Above the Floor", "Stay above 1,800 for 5 days", m.aboveTheFloor || floorDays >= 5],
+        ["🧯 Crash Diet Slayer", "Stay above 1,800 for 30 logged days", floorDays >= 30],
+        ["🎯 Dead Center", "Hit 2,000–2,400 for 5 days", targetDays >= 5],
+        ["🎯🎯 True Aim", "Hit 2,000–2,400 for 14 days", targetDays >= 14],
+        ["🏹 Calorie Deadeye", "Hit 2,000–2,400 for 30 days", targetDays >= 30],
+        ["💯 Overdrive", "Hit 200g protein in a day", m.overdrive || overdrive],
+        ["🦍 Titan Protein", "Hit 225g protein in a day", titanProtein],
+        ["🌶️ Buffalo-Blessed", "Log a buffalo-sauce meal", buffaloMentioned],
+        ["🥡 Prep Goblin Defeated", "Use meal prep instead of scrambling", mealPrepMentioned],
+      ],
+    },
+    {
+      name: "Hydration",
+      items: [
+        ["💧 First Spring", "Hit 80 oz once", m.firstWaterGoal || waterCount >= 1],
+        ["🌊 The Well", "First 80 oz day", m.firstWaterGoal || waterCount >= 1],
+        ["🏞️ River Ranger", "Water goal 7 days", waterCount >= 7],
+        ["🌧️ Monsoon", "Hit 100 oz in a day", m.monsoon || monsoon],
+        ["🧊 Ice and Iron", "Water goal 30 days", waterCount >= 30],
+        ["🏔️ Mountain Spring", "Water goal 60 days", waterCount >= 60],
+        ["🌊 Ocean Road", "Water goal 100 days", waterCount >= 100],
+        ["💦 Canteen Carrier", "Log 500 total oz of water", totalWater >= 500],
+        ["🏺 Wellkeeper", "Log 1,000 total oz of water", totalWater >= 1000],
+        ["🌊 Floodgate", "Hit 120 oz in a day", floodGate],
+      ],
+    },
+    {
+      name: "Fitness",
+      items: [
+        ["🥊 First Blood", "First workout done", m.firstWorkout || workoutCount >= 1],
+        ["🏋️ 5 Battles Won", "5 workouts complete", workoutCount >= 5],
+        ["⚔️ 10 Battles Won", "10 workouts complete", workoutCount >= 10],
+        ["🛡️ 25 Battles Won", "25 workouts complete", workoutCount >= 25],
+        ["🗡️ 50 Battles Won", "50 workouts complete", workoutCount >= 50],
+        ["🏰 100 Battles Won", "100 workouts complete", workoutCount >= 100],
+        ["🧱 Plank Initiate", "First plank held", m.firstPlank],
+        ["🔄 The Switch", "Moved to 2×15 · 15lb", m.switchedTo2x15],
+        ["💪 Pushup Test", "1×10 passed, not in regime yet", m.pushupTestPassed],
+        ["🚶 Step Seeker", "Hit 5,000 steps", m.stepSeeker || stepSeeker],
+        ["🏃 Road Ranger", "Hit 10,000 steps", roadRanger],
+        ["🐺 Trail Beast", "Hit 15,000 steps", stepChampion],
+        ["🗺️ Long March", "Hit 20,000 steps", longMarch],
+        ["🌤️ Active Recovery", "Log 5,000+ steps on a non-workout day", noWorkoutButLogged],
+        ["👣 50K Footprints", "Log 50,000 total steps", totalSteps >= 50000],
+        ["🥾 100K Footprints", "Log 100,000 total steps", totalSteps >= 100000],
+        ["🔥 Furnace Keeper", "Log 5,000 total watch calories burned", totalBurned >= 5000],
+        ["🚴 Wheel of the Ranger", "Log a bike ride", bikeMentioned],
+        ["🚶 Pathwalker", "Log a walk", walkMentioned],
+      ],
+    },
+    {
+      name: "Weekend Warrior",
+      items: [
+        ["🏕️ Weekend Scout", "First clean weekend", cleanWeekend],
+        ["🌄 Saturday Slayer", "3 clean Saturdays", false],
+        ["🌇 The Long Weekend", "3 clean full weekends", false],
+        ["🗺️ No Man's Land", "Weekend plan 5 times", false],
+        ["🧭 True North", "No weekend slips for a month", false],
+        ["🌙 Night Owl Tamed", "Log food despite late night", lateNightLogged],
+        ["🧊 Cold Breakfast Ready", "Prep weekend food before waking late", false],
+        ["🎮 Queue While Fed", "Log meals before a long gaming session", false],
+      ],
+    },
+    {
+      name: "System Mastery",
+      items: [
+        ["💾 Save File Created", "Import a save or log locally", importUsed || loggedCount >= 1],
+        ["🧪 Preset Alchemist", "Create at least one food preset", presetsUsed],
+        ["⚗️ Preset Archivist", "Create 5 food presets", presetCount >= 5],
+        ["📝 Quick Scribe", "Use Quick Log 5 times", quickLogs >= 5],
+        ["📜 Field Reporter", "Use Quick Log 25 times", quickLogs >= 25],
+        ["📦 Backup Keeper", "Export backup manually", false],
+        ["🔧 Tinkerer", "Customize the template", false],
+        ["🧙 Parser Whisperer", "Import a regular text save", importUsed],
+      ],
+    },
+    {
+      name: "Hidden",
+      items: [
+        ["❓ ???", "Hidden · keep going", false, true],
+        ["❓ ???", "Hidden · keep going", false, true],
+        ["❓ ???", "Hidden · keep going", false, true],
+        ["❓ ???", "Hidden · keep going", false, true],
+        ["❓ ???", "Hidden · keep going", false, true],
+        ["❓ ???", "Hidden · keep going", false, true],
+        ["❓ ???", "Hidden · keep going", false, true],
+        ["❓ ???", "Hidden · keep going", false, true],
+      ],
+    },
   ];
 }
 
 function deriveTitles(save, totalXp) {
-  const ach = deriveAchievements(save).flatMap((g) => g.items).filter((a) => a[2]).map((a) => a[0]);
-  const unlocked = new Set(ach);
+  const achieved = new Set(deriveAchievements(save).flatMap((g) => g.items).filter((a) => a[2]).map((a) => a[0]));
   const low = lowestWeight(save);
-  const earned = ["🌱 The Wanderer"];
-  if (totalXp >= 1200) earned.push("🏹 Initiated Ranger");
-  if (totalXp >= 2500) earned.push("🦌 Seasoned Tracker");
-  if (unlocked.has("⚔️ Trail Blazer")) earned.push("📜 The Chronicler");
-  if (save.manualUnlocks.firstMealPrep) earned.push("🍱 Provision Master");
-  if (save.manualUnlocks.switchedTo2x15) earned.push("🔄 The Adapted");
-  if (low <= 250) earned.push("🌲 Into the Woods");
-  if (low < 247) earned.push("⚡ Danger Zone Crossed");
-  if (low <= 240) earned.push("🦅 Highland Ranger");
-  if (unlocked.has("🛡️ Iron Will")) earned.push("🛡️ Iron Will");
-  if (unlocked.has("💎 Diamond Discipline")) earned.push("💎 Diamond Discipline");
-  if (low <= 220) earned.push("🏔️ Summit Seeker");
-  if (low <= 200) earned.push("🌟 Ranger Elite");
-  if (low <= 180) earned.push("🎓 The Graduate");
-  if (totalXp >= 345000) earned.push("👑 The Ranger's Oath");
-  const locked = ["🌲 Into the Woods", "⚡ Danger Zone Crossed", "🦅 Highland Ranger", "🛡️ Iron Will", "🏕️ Weekend Warrior", "💎 Diamond Discipline", "🏔️ Summit Seeker", "🌟 Ranger Elite", "🎓 The Graduate", "👑 The Ranger's Oath"].filter((t) => !earned.includes(t));
+  const hasWeight = low !== null;
+  const start = save.profile.startWeight;
+  const poundsLost = start !== null && hasWeight ? start - low : 0;
+  const days = save.days || [];
+  const loggedCount = days.filter((d) => dayXp(d).logged).length;
+  const perfectCount = days.filter((d) => dayXp(d).perfect).length;
+  const waterCount = days.filter((d) => (d.water || 0) >= 80).length;
+  const proteinCount = days.filter((d) => (d.protein || 0) >= 150).length;
+  const workoutCount = days.filter((d) => d.workoutComplete).length;
+  const maxStreak = longestLoggedStreak(days);
+  const totalSteps = days.reduce((sum, d) => sum + (Number(d.steps) || 0), 0);
+  const notesText = days.flatMap((d) => d.notes || []).join(" ").toLowerCase();
+
+  const titleChecks = [
+    ["🌱 The Wanderer", true],
+    ["🏹 Initiated Ranger", totalXp >= 1200],
+    ["🦌 Seasoned Tracker", totalXp >= 2500],
+    ["🗺️ Pathfinder", totalXp >= 4300],
+    ["🌿 Woodsman", totalXp >= 6500],
+    ["🏕️ Trail Runner", totalXp >= 9000],
+    ["🦅 Scout Ranger", totalXp >= 12000],
+    ["⚔️ Tested Ranger", totalXp >= 15500],
+    ["🛡️ Iron Ranger", totalXp >= 19500],
+    ["🌙 Night Stalker", totalXp >= 24000],
+    ["📜 The Chronicler", achieved.has("⚔️ Trail Blazer")],
+    ["📚 Archive Keeper", loggedCount >= 30],
+    ["🏛️ Keeper of the Log", loggedCount >= 90],
+    ["👑 Yearlong Chronicler", loggedCount >= 365],
+    ["🍱 Provision Master", save.manualUnlocks.firstMealPrep || achieved.has("🍱 Ranger's Ration")],
+    ["🔄 The Adapted", save.manualUnlocks.switchedTo2x15 || achieved.has("🔄 The Switch")],
+    ["🌲 Into the Woods", hasWeight && low <= 250],
+    ["⚡ Danger Zone Crossed", hasWeight && low < 247],
+    ["🦅 Highland Ranger", hasWeight && low <= 240],
+    ["🗻 Cloudbreaker", hasWeight && low <= 230],
+    ["🏔️ Summit Seeker", hasWeight && low <= 220],
+    ["🌊 Wavebreaker", hasWeight && low <= 210],
+    ["🌟 Ranger Elite", hasWeight && low <= 200],
+    ["💫 Final-Mile Walker", hasWeight && low <= 190],
+    ["🎓 The Graduate", hasWeight && low <= 180],
+    ["🪶 Feather-Cut", poundsLost >= 5],
+    ["🪨 Stone-Cut", poundsLost >= 10],
+    ["⚒️ Iron-Cut", poundsLost >= 30],
+    ["🪄 Fifty Down", poundsLost >= 50],
+    ["⭐ Oathbound", poundsLost >= 74],
+    ["🛡️ Iron Will", perfectCount >= 5],
+    ["💎 Diamond Discipline", perfectCount >= 10],
+    ["🌟 Perfect Ranger", perfectCount >= 30],
+    ["🔥 Streakbearer", maxStreak >= 7],
+    ["⚡ Lightning-Bound", maxStreak >= 14],
+    ["🌋 The Unstoppable", maxStreak >= 30],
+    ["🥩 Meat & Iron", achieved.has("🍖 Meat & Iron")],
+    ["💪 Muscle Keeper", proteinCount >= 30],
+    ["🦾 Protein Bulwark", proteinCount >= 60],
+    ["💧 Well-Touched", waterCount >= 1],
+    ["🏞️ River Ranger", waterCount >= 7],
+    ["🧊 Ice and Iron", waterCount >= 30],
+    ["🌊 Ocean Road", waterCount >= 100],
+    ["🥊 First Blooded", achieved.has("🥊 First Blood")],
+    ["🏋️ Battle-Tested", workoutCount >= 5],
+    ["⚔️ Blade-Trained", workoutCount >= 10],
+    ["🛡️ Battle-Hardened", workoutCount >= 25],
+    ["🏰 Century Fighter", workoutCount >= 100],
+    ["🚶 Step Seeker", achieved.has("🚶 Step Seeker")],
+    ["🏃 Road Ranger", achieved.has("🏃 Road Ranger")],
+    ["🐺 Trail Beast", achieved.has("🐺 Trail Beast")],
+    ["👣 Thousand-Foot Ranger", totalSteps >= 100000],
+    ["🚴 Wheel Ranger", notesText.includes("bike") || notesText.includes("cycling")],
+    ["🏕️ Weekend Warrior", achieved.has("🏕️ Weekend Scout")],
+    ["🌙 Night Owl Tamed", achieved.has("🌙 Night Owl Tamed")],
+    ["🧪 Preset Alchemist", achieved.has("🧪 Preset Alchemist")],
+    ["🧙 Parser Whisperer", achieved.has("🧙 Parser Whisperer")],
+    ["👑 The Ranger's Oath", totalXp >= 345000 || (hasWeight && low <= 180)],
+  ];
+
+  const earned = titleChecks.filter(([, unlocked]) => unlocked).map(([title]) => title);
+  const locked = titleChecks.filter(([, unlocked]) => !unlocked).map(([title]) => title);
   return { earned, locked };
+}
+
+function extractPromise(text, baseSave) {
+  const promise = { ...baseSave.promise };
+  const titleMatch = text.match(/🤍\s*([^—\n]+?)(?:\s*—|\n)/);
+  const quoteMatch = text.match(/"([^"]*promise[^"]*)"/i);
+  const madeMatch = text.match(/Made:\s*([^·\n]+)(?:·|$)/i);
+  const byMatch = text.match(/By:\s*([^·\n]+)(?:·|$)/i);
+  const forMatch = text.match(/For:\s*([^\n]+)/i);
+  if (titleMatch) promise.title = titleMatch[1].trim();
+  if (quoteMatch) promise.flavor = quoteMatch[1].trim();
+  if (madeMatch) promise.made = madeMatch[1].trim();
+  if (byMatch) promise.by = byMatch[1].trim();
+  if (forMatch) promise.for = forMatch[1].trim();
+  return promise;
+}
+
+function parseClaudeSaveFile(text, baseSave) {
+  const lower = text.toLowerCase();
+  const dateTitle = text.match(/RANGER SAVE FILE\s*[—-]\s*([A-Za-z]+\s+\d{1,2},\s+\d{4})/i);
+  const parsedDate = dateTitle ? safeIsoDate(dateTitle[1], baseSave.meta.lastUpdated || todayKey()) : baseSave.meta.lastUpdated || todayKey();
+  const totalXpMatch = text.match(/Total XP:\s*([\d,]+)/i);
+  const currentWeightMatch = text.match(/Current weight:\s*~?([\d.]+)/i);
+  const baselineMatch = text.match(/Official baseline:\s*([\d.]+)\s*lbs/i);
+  const dayMatch = text.match(/Day:\s*(\d+)/i);
+  const nextWorkoutMatch = text.match(/Next workout:\s*(Day\s*[AB])/i);
+  const goalMatch = text.match(/Goal:\s*([\d.]+)\s*lbs/i);
+
+  const manualUnlocks = {
+    ...baseSave.manualUnlocks,
+    firstEntry: lower.includes("first entry") || baseSave.manualUnlocks.firstEntry,
+    trailBlazer: lower.includes("trail blazer") || baseSave.manualUnlocks.trailBlazer,
+    firstWeighIn: lower.includes("first blood") || lower.includes("weigh-in") || baseSave.manualUnlocks.firstWeighIn,
+    firstWorkout: lower.includes("first blood (workout)") || lower.includes("first workout") || baseSave.manualUnlocks.firstWorkout,
+    firstPlank: lower.includes("plank initiate") || baseSave.manualUnlocks.firstPlank,
+    switchedTo2x15: lower.includes("the switch") || lower.includes("2×15") || lower.includes("2x15") || baseSave.manualUnlocks.switchedTo2x15,
+    firstProteinGoal: lower.includes("meat & iron") || lower.includes("meat and iron") || baseSave.manualUnlocks.firstProteinGoal,
+    aboveTheFloor: lower.includes("above the floor") || baseSave.manualUnlocks.aboveTheFloor,
+    overdrive: lower.includes("overdrive") || baseSave.manualUnlocks.overdrive,
+    firstMealPrep: lower.includes("ranger's ration") || lower.includes("first meal prep") || baseSave.manualUnlocks.firstMealPrep,
+    firstWaterGoal: lower.includes("the well") || baseSave.manualUnlocks.firstWaterGoal,
+    monsoon: lower.includes("monsoon") || baseSave.manualUnlocks.monsoon,
+    stepSeeker: lower.includes("step seeker") || baseSave.manualUnlocks.stepSeeker,
+    weekendScout: lower.includes("weekend scout") || baseSave.manualUnlocks.weekendScout,
+    firstCleanWeekend: lower.includes("first clean weekend") || baseSave.manualUnlocks.firstCleanWeekend,
+    airFryerBatch: lower.includes("air fryer apprentice") || lower.includes("air fryer chicken") || baseSave.manualUnlocks.airFryerBatch,
+    pushupTestPassed: lower.includes("pushup test passed") || baseSave.manualUnlocks.pushupTestPassed,
+  };
+
+  return normalizeSave({
+    ...baseSave,
+    profile: {
+      ...baseSave.profile,
+      startWeight: baselineMatch ? Number(baselineMatch[1]) : baseSave.profile.startWeight,
+      currentWeight: currentWeightMatch ? Number(currentWeightMatch[1]) : baseSave.profile.currentWeight,
+      goalWeight: goalMatch ? Number(goalMatch[1]) : baseSave.profile.goalWeight,
+      importedXp: totalXpMatch ? Number(totalXpMatch[1].replace(/,/g, "")) : baseSave.profile.importedXp,
+      importedLabel: `Imported snapshot through ${parsedDate}`,
+    },
+    meta: {
+      ...baseSave.meta,
+      currentDay: dayMatch ? Number(dayMatch[1]) : baseSave.meta.currentDay,
+      lastUpdated: parsedDate,
+      nextWorkout: nextWorkoutMatch ? nextWorkoutMatch[1].replace(/\s+/, " ").replace(/day/i, "Day") : baseSave.meta.nextWorkout,
+    },
+    manualUnlocks,
+    days: [],
+    importedNotes: text,
+    promise: extractPromise(text, baseSave),
+  });
+}
+
+function parseImportedText(text, baseSave) {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("The import text was empty.");
+  try {
+    return normalizeSave(JSON.parse(trimmed));
+  } catch {
+    return parseClaudeSaveFile(trimmed, baseSave);
+  }
 }
 
 function parseQuickLog(text, save) {
@@ -382,67 +708,7 @@ function applyQuickLog(save, parsed) {
     notes: [...(existing.notes || []), ...(parsed.notes || [])],
   };
   const days = save.days.filter((d) => d.date !== date).concat(updated).sort((a, b) => a.date.localeCompare(b.date));
-  return { ...save, profile: { ...save.profile, currentWeight: updated.weight || save.profile.currentWeight }, days, meta: { ...save.meta, lastUpdated: date, currentDay: Math.max(save.meta.currentDay || 1, days.length + 12) } };
-}
-
-function parseClaudeSaveFile(text, baseSave) {
-  const lower = text.toLowerCase();
-  const dateTitle = text.match(/RANGER SAVE FILE\s*[—-]\s*([A-Za-z]+\s+\d{1,2},\s+\d{4})/i);
-  const parsedDate = dateTitle ? safeIsoDate(dateTitle[1], baseSave.meta.lastUpdated || todayKey()) : baseSave.meta.lastUpdated || todayKey();
-  const totalXpMatch = text.match(/Total XP:\s*([\d,]+)/i);
-  const currentWeightMatch = text.match(/Current weight:\s*~?([\d.]+)/i);
-  const baselineMatch = text.match(/Official baseline:\s*([\d.]+)\s*lbs/i);
-  const dayMatch = text.match(/Day:\s*(\d+)/i);
-  const nextWorkoutMatch = text.match(/Next workout:\s*(Day\s*[AB])/i);
-  const goalMatch = text.match(/Goal:\s*([\d.]+)\s*lbs/i);
-
-  const manualUnlocks = {
-    ...baseSave.manualUnlocks,
-    firstEntry: lower.includes("first entry") || baseSave.manualUnlocks.firstEntry,
-    trailBlazer: lower.includes("trail blazer") || baseSave.manualUnlocks.trailBlazer,
-    firstWeighIn: lower.includes("first blood") || lower.includes("weigh-in") || baseSave.manualUnlocks.firstWeighIn,
-    firstWorkout: lower.includes("first blood (workout)") || lower.includes("first workout") || baseSave.manualUnlocks.firstWorkout,
-    firstPlank: lower.includes("plank initiate") || baseSave.manualUnlocks.firstPlank,
-    switchedTo2x15: lower.includes("the switch") || lower.includes("2×15") || lower.includes("2x15") || baseSave.manualUnlocks.switchedTo2x15,
-    firstProteinGoal: lower.includes("meat & iron") || lower.includes("meat and iron") || baseSave.manualUnlocks.firstProteinGoal,
-    aboveTheFloor: lower.includes("above the floor") || baseSave.manualUnlocks.aboveTheFloor,
-    overdrive: lower.includes("overdrive") || baseSave.manualUnlocks.overdrive,
-    firstMealPrep: lower.includes("ranger's ration") || lower.includes("first meal prep") || baseSave.manualUnlocks.firstMealPrep,
-    firstWaterGoal: lower.includes("the well") || baseSave.manualUnlocks.firstWaterGoal,
-    monsoon: lower.includes("monsoon") || baseSave.manualUnlocks.monsoon,
-    stepSeeker: lower.includes("step seeker") || baseSave.manualUnlocks.stepSeeker,
-    weekendScout: lower.includes("weekend scout") || baseSave.manualUnlocks.weekendScout,
-    firstCleanWeekend: lower.includes("first clean weekend") || baseSave.manualUnlocks.firstCleanWeekend,
-    airFryerBatch: lower.includes("air fryer apprentice") || lower.includes("air fryer chicken") || baseSave.manualUnlocks.airFryerBatch,
-    pushupTestPassed: lower.includes("pushup test passed") || baseSave.manualUnlocks.pushupTestPassed,
-  };
-
-  const presets = [...baseSave.presets];
-  if (lower.includes("week 3 meal prep") && !presets.some((p) => p.id === "week-3-meal-prep")) {
-    presets.push({ id: "week-3-meal-prep", name: "Week 3 Meal Prep", calories: 700, protein: 65, aliases: ["week 3 meal prep", "air fryer chicken", "chicken breast rice broccoli cheese green onion"] });
-  }
-
-  return normalizeSave({
-    ...baseSave,
-    profile: {
-      ...baseSave.profile,
-      startWeight: baselineMatch ? Number(baselineMatch[1]) : baseSave.profile.startWeight,
-      currentWeight: currentWeightMatch ? Number(currentWeightMatch[1]) : baseSave.profile.currentWeight,
-      goalWeight: goalMatch ? Number(goalMatch[1]) : baseSave.profile.goalWeight,
-      importedXp: totalXpMatch ? Number(totalXpMatch[1].replace(/,/g, "")) : baseSave.profile.importedXp,
-      importedLabel: `Claude snapshot through ${parsedDate}`,
-    },
-    meta: {
-      ...baseSave.meta,
-      currentDay: dayMatch ? Number(dayMatch[1]) : baseSave.meta.currentDay,
-      lastUpdated: parsedDate,
-      nextWorkout: nextWorkoutMatch ? nextWorkoutMatch[1].replace(/\s+/, " ").replace(/day/i, "Day") : baseSave.meta.nextWorkout,
-    },
-    manualUnlocks,
-    presets,
-    days: [],
-    importedNotes: text,
-  });
+  return { ...save, profile: { ...save.profile, currentWeight: updated.weight || save.profile.currentWeight }, days, meta: { ...save.meta, lastUpdated: date, currentDay: Math.max(save.meta.currentDay || 1, days.length) } };
 }
 
 function Card({ children, className = "" }) {
@@ -472,19 +738,20 @@ function Bar({ value, max, label, gradient, subtext }) {
 function CharacterTab({ save, today, levelInfo, daily, totalXp }) {
   const p = save.profile;
   const cw = currentWeight(save, today);
-  const weightPct = ((p.startWeight - cw) / (p.startWeight - p.goalWeight)) * 100;
+  const hasWeightTrack = p.startWeight !== null && p.goalWeight !== null && cw !== null;
+  const weightPct = hasWeightTrack ? ((p.startWeight - cw) / (p.startWeight - p.goalWeight)) * 100 : 0;
   const netCalories = (today.calories || 0) - (today.caloriesBurned || 0);
   const workoutDay = today.workoutDay || nextWorkout(save);
   const calorieTone = (today.calories || 0) === 0 ? "gold" : (today.calories || 0) < 1800 ? "red" : (today.calories || 0) <= 2400 ? "green" : "gold";
 
   return <div className="grid gap-4 lg:grid-cols-3">
-    <Card className="lg:col-span-2"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="text-3xl font-black tracking-tight text-[#f0c040]">{p.name}</div><div className="mt-1 text-[#e8d5a3]">{p.className} · {p.path}</div><div className="mt-2 flex flex-wrap gap-2"><StatusPill>Age {p.age}</StatusPill><StatusPill>Height {p.height}</StatusPill><StatusPill tone="green">{levelInfo.current[1]}</StatusPill><StatusPill tone="purple">Local save</StatusPill></div></div><motion.div animate={{ rotate: [0, 2, -2, 0] }} transition={{ duration: 5, repeat: Infinity }} className="rounded-2xl border border-[#f0c040]/40 bg-black/40 p-4 text-center"><Shield className="mx-auto h-9 w-9 text-[#f0c040]" /><div className="mt-1 text-xs uppercase tracking-[0.25em] text-[#c6ad72]">Iron Will</div></motion.div></div><div className="mt-6 rounded-2xl border border-[#f0c040]/40 bg-black/30 p-4"><div className="mb-2 flex justify-between text-sm"><span className="font-bold text-[#f0c040]">Level {levelInfo.current[0]} · {levelInfo.current[1]}</span><span className="text-[#c6ad72]">{levelInfo.xpIntoLevel} / {levelInfo.xpNeeded} XP to Level {levelInfo.next[0]}</span></div><div className="h-5 overflow-hidden rounded-full bg-black ring-1 ring-[#8a6a24]"><motion.div initial={{ width: 0 }} animate={{ width: `${levelInfo.pct}%` }} transition={{ duration: 1 }} className="h-full rounded-full" style={{ background: "linear-gradient(90deg, #6b4f00, #c09000, #f0e060)" }} /></div><div className="mt-2 text-xs text-[#c6ad72]">Total XP: {totalXp.toLocaleString()} · Today: {daily.total} XP · {p.importedLabel}: {p.importedXp.toLocaleString()}</div></div></Card>
+    <Card className="lg:col-span-2"><div className="flex flex-wrap items-start justify-between gap-4"><div><div className="text-3xl font-black tracking-tight text-[#f0c040]">{p.name}</div><div className="mt-1 text-[#e8d5a3]">{p.className} · {p.path}</div><div className="mt-2 flex flex-wrap gap-2">{p.age && <StatusPill>Age {p.age}</StatusPill>}{p.height && <StatusPill>Height {p.height}</StatusPill>}<StatusPill tone="green">{levelInfo.current[1]}</StatusPill><StatusPill tone="purple">Local save</StatusPill></div></div><motion.div animate={{ rotate: [0, 2, -2, 0] }} transition={{ duration: 5, repeat: Infinity }} className="rounded-2xl border border-[#f0c040]/40 bg-black/40 p-4 text-center"><Shield className="mx-auto h-9 w-9 text-[#f0c040]" /><div className="mt-1 text-xs uppercase tracking-[0.25em] text-[#c6ad72]">Iron Will</div></motion.div></div><div className="mt-6 rounded-2xl border border-[#f0c040]/40 bg-black/30 p-4"><div className="mb-2 flex justify-between text-sm"><span className="font-bold text-[#f0c040]">Level {levelInfo.current[0]} · {levelInfo.current[1]}</span><span className="text-[#c6ad72]">{levelInfo.xpIntoLevel} / {levelInfo.xpNeeded} XP to Level {levelInfo.next[0]}</span></div><div className="h-5 overflow-hidden rounded-full bg-black ring-1 ring-[#8a6a24]"><motion.div initial={{ width: 0 }} animate={{ width: `${levelInfo.pct}%` }} transition={{ duration: 1 }} className="h-full rounded-full" style={{ background: "linear-gradient(90deg, #6b4f00, #c09000, #f0e060)" }} /></div><div className="mt-2 text-xs text-[#c6ad72]">Total XP: {totalXp.toLocaleString()} · Today: {daily.total} XP · {p.importedLabel}: {p.importedXp.toLocaleString()}</div></div></Card>
     <Card><SectionTitle icon={Activity}>Activity Stats</SectionTitle><div className="grid grid-cols-3 gap-2 text-center"><div className="rounded-xl bg-black/35 p-3"><div className="text-xl font-bold text-[#f0c040]">{(today.steps || 0).toLocaleString()}</div><div className="text-xs text-[#c6ad72]">Steps</div></div><div className="rounded-xl bg-black/35 p-3"><div className="text-xl font-bold text-[#f0c040]">{today.activeMinutes || 0}</div><div className="text-xs text-[#c6ad72]">Active Min</div></div><div className="rounded-xl bg-black/35 p-3"><div className="text-xl font-bold text-[#f0c040]">{today.caloriesBurned || 0}</div><div className="text-xs text-[#c6ad72]">Burned</div></div></div></Card>
     <Card><SectionTitle icon={Droplets}>Vital Bars</SectionTitle><div className="space-y-4"><Bar value={today.water || 0} max={80} label="Water" gradient="linear-gradient(90deg, #1a5fa0, #40c0f0)" subtext={`${today.water || 0} oz / 80 oz`} /><Bar value={today.calories || 0} max={2400} label="Calories" gradient="linear-gradient(90deg, #1a6b1a, #40c040)" subtext={`${today.calories || 0} kcal`} /><Bar value={today.protein || 0} max={180} label="Protein" gradient="linear-gradient(90deg, #5a1a8b, #a040f0)" subtext={`${today.protein || 0}g / 150g+`} /></div></Card>
-    <Card><SectionTitle icon={Weight}>Weight Track</SectionTitle><div className="text-sm text-[#e8d5a3]">{cw} lbs → {p.goalWeight} lbs</div><div className="relative mt-5 h-4 rounded-full bg-black ring-1 ring-[#8a6a24]"><motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(0, Math.min(100, weightPct))}%` }} transition={{ duration: 0.8 }} className="h-full rounded-full bg-gradient-to-r from-[#6b4f00] via-[#c09000] to-[#f0e060]" />{[254.6, 250, 247, 240, 220, 200, 180].map((m) => { const pos = ((p.startWeight - m) / (p.startWeight - p.goalWeight)) * 100; return <div key={m} className="absolute top-1/2 h-6 w-[2px] -translate-y-1/2 bg-[#e8d5a3]" style={{ left: `${Math.max(0, Math.min(100, pos))}%` }} />; })}</div><div className="mt-3 flex justify-between text-[10px] text-[#c6ad72]"><span>254.6</span><span>250</span><span>247</span><span>240</span><span>220</span><span>200</span><span>180</span></div><div className="mt-3 rounded-xl border border-[#f0c040]/25 bg-black/30 p-3 text-xs text-[#c6ad72]">247 to 250 is the danger zone checkpoint, not the victory lap.</div></Card>
+    <Card><SectionTitle icon={Weight}>Weight Track</SectionTitle><div className="text-sm text-[#e8d5a3]">{hasWeightTrack ? `${cw} lbs → ${p.goalWeight} lbs` : "Import a save file to activate weight tracking."}</div><div className="relative mt-5 h-4 rounded-full bg-black ring-1 ring-[#8a6a24]"><motion.div initial={{ width: 0 }} animate={{ width: `${Math.max(0, Math.min(100, weightPct))}%` }} transition={{ duration: 0.8 }} className="h-full rounded-full bg-gradient-to-r from-[#6b4f00] via-[#c09000] to-[#f0e060]" />{hasWeightTrack && [p.startWeight, 250, 247, 240, 220, 200, p.goalWeight].filter((m, index, arr) => m !== null && arr.indexOf(m) === index).map((m) => { const pos = ((p.startWeight - m) / (p.startWeight - p.goalWeight)) * 100; return <div key={m} className="absolute top-1/2 h-6 w-[2px] -translate-y-1/2 bg-[#e8d5a3]" style={{ left: `${Math.max(0, Math.min(100, pos))}%` }} />; })}</div><div className="mt-3 flex justify-between text-[10px] text-[#c6ad72]">{hasWeightTrack ? [p.startWeight, 250, 247, 240, 220, 200, p.goalWeight].filter((m, index, arr) => m !== null && arr.indexOf(m) === index).map((m) => <span key={m}>{m}</span>) : <span>No weight data imported</span>}</div><div className="mt-3 rounded-xl border border-[#f0c040]/25 bg-black/30 p-3 text-xs text-[#c6ad72]">Danger zone and milestone markers activate after importing a personal save.</div></Card>
     <Card><SectionTitle icon={Dumbbell}>Workout · {workoutDay}</SectionTitle><div className="space-y-2">{workouts[workoutDay].map(([name, detail]) => <div key={name} className="flex items-center justify-between rounded-xl bg-black/30 px-3 py-2 text-sm"><span className="text-[#e8d5a3]">{today.workoutComplete ? "✓" : "○"} {name}</span><span className="text-[#c6ad72]">{detail}</span></div>)}</div><div className="mt-3 flex flex-wrap gap-2"><StatusPill tone={today.workoutComplete ? "green" : "gold"}>{today.workoutComplete ? "Training cleared" : "Training pending"}</StatusPill>{save.manualUnlocks.pushupTestPassed && <StatusPill tone="purple">Pushup test passed</StatusPill>}</div></Card>
     <Card><SectionTitle icon={ScrollText}>Day Summary</SectionTitle><div className="grid gap-2 text-sm"><div className="flex justify-between rounded-xl bg-black/30 p-3"><span>Consumed</span><b className="text-[#f0c040]">{today.calories || 0} kcal</b></div><div className="flex justify-between rounded-xl bg-black/30 p-3"><span>Protein</span><b className="text-[#f0c040]">{today.protein || 0}g</b></div><div className="flex justify-between rounded-xl bg-black/30 p-3"><span>Net</span><b className="text-[#f0c040]">{netCalories} kcal</b></div><div className="flex justify-between rounded-xl bg-black/30 p-3"><span>Status</span><StatusPill tone={calorieTone}>{(today.calories || 0) === 0 ? "No log yet" : (today.calories || 0) < 1800 ? "Under floor" : (today.calories || 0) <= 2400 ? "Target hit" : "Over target"}</StatusPill></div></div></Card>
-    <Card className="lg:col-span-3"><SectionTitle icon={Map}>Observer Notes</SectionTitle><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><div className="rounded-xl border border-[#40c040]/30 bg-[#0f2b12]/80 p-3 text-sm text-[#d8f5d8]">✅ Snapshot imported: Level {levelInfo.current[0]}, {totalXp.toLocaleString()} XP.</div><div className="rounded-xl border border-[#a040f0]/30 bg-[#241132]/80 p-3 text-sm text-[#ead7ff]">🍖 Protein target remains 150–180g. Preserve muscle, avoid crash-diet goblin mode.</div><div className="rounded-xl border border-[#40c0f0]/30 bg-[#0d2430]/80 p-3 text-sm text-[#d8f3ff]">💧 Water target: 80 oz. Monsoon already unlocked.</div><div className="rounded-xl border border-[#f0c040]/30 bg-[#2c2108]/80 p-3 text-sm text-[#f8e7aa]">🌙 Friday warning stays active. Weekend chaos loses to prepared food.</div></div></Card>
+    <Card className="lg:col-span-3"><SectionTitle icon={Map}>Observer Notes</SectionTitle><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4"><div className="rounded-xl border border-[#40c040]/30 bg-[#0f2b12]/80 p-3 text-sm text-[#d8f5d8]">✅ Snapshot XP: {save.profile.importedXp.toLocaleString()} imported.</div><div className="rounded-xl border border-[#a040f0]/30 bg-[#241132]/80 p-3 text-sm text-[#ead7ff]">🍖 Protein target remains 150–180g. Preserve muscle, avoid crash-diet goblin mode.</div><div className="rounded-xl border border-[#40c0f0]/30 bg-[#0d2430]/80 p-3 text-sm text-[#d8f3ff]">💧 Water target: 80 oz. Hydration logs parse from plain text.</div><div className="rounded-xl border border-[#f0c040]/30 bg-[#2c2108]/80 p-3 text-sm text-[#f8e7aa]">🌙 Friday warning stays active. Weekend chaos loses to prepared food.</div></div></Card>
   </div>;
 }
 
@@ -515,19 +782,17 @@ function QuickLogTab({ save, setSave }) {
     setPresetProtein("");
     setPresetAliases("");
   };
-
   const deletePreset = (presetId) => {
     const preset = save.presets.find((p) => p.id === presetId);
     if (!preset) return;
-    const confirmed = window.confirm(`Delete preset "${preset.name}"?`);
-    if (!confirmed) return;
+    if (!window.confirm(`Delete preset "${preset.name}"?`)) return;
     const next = { ...save, presets: save.presets.filter((p) => p.id !== presetId) };
     writeSave(next);
     setSave(next);
   };
   return <div className="grid gap-4 lg:grid-cols-3">
-    <Card className="lg:col-span-2"><SectionTitle icon={Plus}>Quick Log</SectionTitle><textarea value={text} onChange={(e) => setText(e.target.value)} className="min-h-40 w-full rounded-2xl border border-[#8a6a24]/60 bg-black/50 p-4 text-[#e8d5a3] outline-none placeholder:text-[#8f8262] focus:border-[#f0c040]" placeholder="Example: weight 251.8, week 3 meal prep, 40 oz water, Day B done, 6420 steps, 46 active, 620 burned" /><div className="mt-3 flex flex-wrap gap-2"><button onClick={runPreview} className="rounded-xl border border-[#f0c040]/50 bg-[#3a2a08] px-4 py-2 font-bold text-[#f0c040]">Preview Parse</button><button onClick={savePreview} disabled={!preview} className="rounded-xl border border-[#40c040]/50 bg-[#0f2b12] px-4 py-2 font-bold text-[#91e691] disabled:opacity-40"><Save className="mr-2 inline h-4 w-4" />Save Entry</button></div>{preview && <div className="mt-4 rounded-2xl border border-[#f0c040]/35 bg-black/30 p-4"><div className="mb-2 font-bold text-[#f0c040]">Review before saving</div><div className="grid gap-2 text-sm md:grid-cols-2"><div>Date: <b>{preview.date}</b></div><div>Weight: <b>{preview.weight ?? "not changed"}</b></div><div>Calories added: <b>{preview.calories || 0}</b></div><div>Protein added: <b>{preview.protein || 0}g</b></div><div>Water added: <b>{preview.water || 0} oz</b></div><div>Steps: <b>{preview.steps ?? "not changed"}</b></div><div>Active minutes: <b>{preview.activeMinutes ?? "not changed"}</b></div><div>Burned: <b>{preview.caloriesBurned ?? "not changed"}</b></div><div>Workout: <b>{preview.workoutComplete ? `${preview.workoutDay} complete` : "not changed"}</b></div><div>Foods matched: <b>{preview.matched?.length ? preview.matched.join(", ") : "none"}</b></div></div>{preview.warnings.length > 0 && <div className="mt-3 space-y-2">{preview.warnings.map((w) => <div key={w} className="rounded-xl border border-[#f05050]/35 bg-[#331010] p-3 text-sm text-[#ffb3b3]">⚠️ {w}</div>)}</div>}</div>}</Card>
-    <Card><SectionTitle icon={Utensils}>Food Presets</SectionTitle><div className="space-y-2">{save.presets.length === 0 && <div className="rounded-xl border border-[#8a6a24]/40 bg-black/30 p-3 text-sm text-[#c6ad72]">No presets saved yet. Add one below when you have a repeated meal worth shortcutting.</div>}{save.presets.map((p) => <div key={p.id} className="rounded-xl bg-black/30 p-3"><div className="flex items-start justify-between gap-3"><div><div className="font-bold text-[#e8d5a3]">{p.name}</div><div className="text-xs text-[#c6ad72]">{p.calories} kcal · {p.protein}g protein</div></div><button onClick={() => deletePreset(p.id)} className="rounded-lg border border-[#f05050]/40 bg-[#331010] px-2 py-1 text-xs font-bold text-[#ff9999] hover:bg-[#4a1414]" title={`Delete ${p.name}`}><Trash2 className="h-3.5 w-3.5" /></button></div><div className="mt-1 text-[11px] text-[#8f8262]">Aliases: {(p.aliases || []).join(", ")}</div></div>)}</div></Card>
+    <Card className="lg:col-span-2"><SectionTitle icon={Plus}>Quick Log</SectionTitle><textarea value={text} onChange={(e) => setText(e.target.value)} className="min-h-40 w-full rounded-2xl border border-[#8a6a24]/60 bg-black/50 p-4 text-[#e8d5a3] outline-none placeholder:text-[#8f8262] focus:border-[#f0c040]" placeholder="Example: weight 251.8, meal prep, 40 oz water, Day B done, 6420 steps, 46 active, 620 burned" /><div className="mt-3 flex flex-wrap gap-2"><button onClick={runPreview} className="rounded-xl border border-[#f0c040]/50 bg-[#3a2a08] px-4 py-2 font-bold text-[#f0c040]">Preview Parse</button><button onClick={savePreview} disabled={!preview} className="rounded-xl border border-[#40c040]/50 bg-[#0f2b12] px-4 py-2 font-bold text-[#91e691] disabled:opacity-40"><Save className="mr-2 inline h-4 w-4" />Save Entry</button></div>{preview && <div className="mt-4 rounded-2xl border border-[#f0c040]/35 bg-black/30 p-4"><div className="mb-2 font-bold text-[#f0c040]">Review before saving</div><div className="grid gap-2 text-sm md:grid-cols-2"><div>Date: <b>{preview.date}</b></div><div>Weight: <b>{preview.weight ?? "not changed"}</b></div><div>Calories added: <b>{preview.calories || 0}</b></div><div>Protein added: <b>{preview.protein || 0}g</b></div><div>Water added: <b>{preview.water || 0} oz</b></div><div>Steps: <b>{preview.steps ?? "not changed"}</b></div><div>Active minutes: <b>{preview.activeMinutes ?? "not changed"}</b></div><div>Burned: <b>{preview.caloriesBurned ?? "not changed"}</b></div><div>Workout: <b>{preview.workoutComplete ? `${preview.workoutDay} complete` : "not changed"}</b></div><div>Foods matched: <b>{preview.matched?.length ? preview.matched.join(", ") : "none"}</b></div></div>{preview.warnings.length > 0 && <div className="mt-3 space-y-2">{preview.warnings.map((w) => <div key={w} className="rounded-xl border border-[#f05050]/35 bg-[#331010] p-3 text-sm text-[#ffb3b3]">⚠️ {w}</div>)}</div>}</div>}</Card>
+    <Card><SectionTitle icon={Utensils}>Food Presets</SectionTitle><div className="space-y-2">{save.presets.length === 0 && <div className="rounded-xl border border-[#8a6a24]/40 bg-black/30 p-3 text-sm text-[#c6ad72]">No presets saved yet. Add one below when a repeated meal is worth shortcutting.</div>}{save.presets.map((p) => <div key={p.id} className="rounded-xl bg-black/30 p-3"><div className="flex items-start justify-between gap-3"><div><div className="font-bold text-[#e8d5a3]">{p.name}</div><div className="text-xs text-[#c6ad72]">{p.calories} kcal · {p.protein}g protein</div></div><button onClick={() => deletePreset(p.id)} className="rounded-lg border border-[#f05050]/40 bg-[#331010] px-2 py-1 text-xs font-bold text-[#ff9999] hover:bg-[#4a1414]" title={`Delete ${p.name}`}><Trash2 className="h-3.5 w-3.5" /></button></div><div className="mt-1 text-[11px] text-[#8f8262]">Aliases: {(p.aliases || []).join(", ")}</div></div>)}</div></Card>
     <Card className="lg:col-span-3"><SectionTitle icon={Plus}>Add Food Preset</SectionTitle><div className="grid gap-3 md:grid-cols-4"><input value={presetName} onChange={(e) => setPresetName(e.target.value)} className="rounded-xl border border-[#8a6a24]/60 bg-black/50 p-3 text-[#e8d5a3] outline-none" placeholder="Preset name" /><input value={presetCalories} onChange={(e) => setPresetCalories(e.target.value)} className="rounded-xl border border-[#8a6a24]/60 bg-black/50 p-3 text-[#e8d5a3] outline-none" placeholder="Calories" /><input value={presetProtein} onChange={(e) => setPresetProtein(e.target.value)} className="rounded-xl border border-[#8a6a24]/60 bg-black/50 p-3 text-[#e8d5a3] outline-none" placeholder="Protein grams" /><input value={presetAliases} onChange={(e) => setPresetAliases(e.target.value)} className="rounded-xl border border-[#8a6a24]/60 bg-black/50 p-3 text-[#e8d5a3] outline-none" placeholder="Aliases, comma separated" /></div><button onClick={addPreset} className="mt-3 rounded-xl border border-[#f0c040]/50 bg-[#3a2a08] px-4 py-2 font-bold text-[#f0c040]">Add Preset</button></Card>
   </div>;
 }
@@ -535,15 +800,16 @@ function QuickLogTab({ save, setSave }) {
 function QuestsTab({ today, save }) {
   const daily = dayXp(today);
   const rows = [["Hold the Line", "≥1,800 kcal", 25, daily.hold], ["Hit Calorie Target", "2,000 to 2,400 kcal", 50, daily.target], ["Ranger's Ration", "150g+ protein", 75, daily.protein], ["Forest Spring", "80 oz water", 50, daily.water], ["Training Grounds", "Workout complete", 125, daily.workout], ["The Ranger's Log", "Everything logged", 25, daily.logged], ["Perfect Day Bonus", "All six daily quests", 75, daily.perfect]];
-  return <div className="grid gap-4 lg:grid-cols-3"><Card className="lg:col-span-2"><SectionTitle icon={ScrollText}>Daily Quests</SectionTitle><div className="space-y-2">{rows.map(([name, desc, xp, done]) => <div key={name} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#8a6a24]/40 bg-black/30 px-4 py-3"><div><div className="font-bold text-[#e8d5a3]">{done ? "✓" : "○"} {name}</div><div className="text-xs text-[#c6ad72]">{desc}</div></div><StatusPill tone={done ? "green" : "gold"}>+{xp} XP</StatusPill></div>)}</div><div className="mt-4 rounded-2xl border border-[#f0c040]/40 bg-[#2c2108] p-4 text-[#e8d5a3]">Daily XP earned: <b className="text-[#f0c040]">{daily.total}</b> / 425</div></Card><Card><SectionTitle icon={Flame}>Weekly Bonus Quests</SectionTitle><div className="space-y-2"><div className="rounded-xl bg-black/30 p-3 text-sm">Weekly bonuses are not auto-awarded yet. V1 treats Claude's snapshot XP as the baseline.</div><div className="rounded-xl bg-black/30 p-3 text-sm text-[#c6ad72]">Next workout from snapshot: <b className="text-[#f0c040]">{save.meta.nextWorkout || nextWorkout(save)}</b></div><div className="rounded-xl bg-black/30 p-3 text-sm text-[#c6ad72]">Friday warning: prepare weekend food before the 4–5am gremlin window.</div></div></Card><Card className="lg:col-span-3"><SectionTitle icon={Star}>Milestone Quests</SectionTitle><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">{[["First weigh-in", 100, save.manualUnlocks.firstWeighIn], ["First meal prep batch", 150, save.manualUnlocks.firstMealPrep], ["First clean weekend", 400, save.manualUnlocks.firstCleanWeekend], ["Air fryer chicken batch", 150, save.manualUnlocks.airFryerBatch]].map(([name, xp, done]) => <div key={name} className={`rounded-2xl border p-4 ${done ? "border-[#40c040]/40 bg-[#0f2b12]/75" : "border-[#8a6a24]/40 bg-black/30"}`}>{done ? "✓" : "🔒"} {name} <StatusPill tone={done ? "green" : "gold"}>+{xp}</StatusPill></div>)}</div></Card></div>;
+  return <div className="grid gap-4 lg:grid-cols-3"><Card className="lg:col-span-2"><SectionTitle icon={ScrollText}>Daily Quests</SectionTitle><div className="space-y-2">{rows.map(([name, desc, xp, done]) => <div key={name} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#8a6a24]/40 bg-black/30 px-4 py-3"><div><div className="font-bold text-[#e8d5a3]">{done ? "✓" : "○"} {name}</div><div className="text-xs text-[#c6ad72]">{desc}</div></div><StatusPill tone={done ? "green" : "gold"}>+{xp} XP</StatusPill></div>)}</div><div className="mt-4 rounded-2xl border border-[#f0c040]/40 bg-[#2c2108] p-4 text-[#e8d5a3]">Daily XP earned: <b className="text-[#f0c040]">{daily.total}</b> / 425</div></Card><Card><SectionTitle icon={Flame}>Weekly Bonus Quests</SectionTitle><div className="space-y-2"><div className="rounded-xl bg-black/30 p-3 text-sm">Weekly bonuses are not auto-awarded yet. Snapshot XP is used as the baseline after import.</div><div className="rounded-xl bg-black/30 p-3 text-sm text-[#c6ad72]">Next workout: <b className="text-[#f0c040]">{save.meta.nextWorkout || nextWorkout(save)}</b></div><div className="rounded-xl bg-black/30 p-3 text-sm text-[#c6ad72]">Friday warning: prepare weekend food before the late-night gremlin window.</div></div></Card><Card className="lg:col-span-3"><SectionTitle icon={Star}>Milestone Quests</SectionTitle><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">{[["First weigh-in", 100, save.manualUnlocks.firstWeighIn], ["First meal prep batch", 150, save.manualUnlocks.firstMealPrep], ["First clean weekend", 400, save.manualUnlocks.firstCleanWeekend], ["Air fryer chicken batch", 150, save.manualUnlocks.airFryerBatch]].map(([name, xp, done]) => <div key={name} className={`rounded-2xl border p-4 ${done ? "border-[#40c040]/40 bg-[#0f2b12]/75" : "border-[#8a6a24]/40 bg-black/30"}`}>{done ? "✓" : "🔒"} {name} <StatusPill tone={done ? "green" : "gold"}>+{xp}</StatusPill></div>)}</div></Card></div>;
 }
 
 function AchievementsTab({ save }) {
-  return <div className="space-y-4">{deriveAchievements(save).map((group) => <Card key={group.name}><SectionTitle icon={Award}>{group.name}</SectionTitle><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">{group.items.map(([name, desc, unlocked, hidden], idx) => <div key={`${name}-${idx}`} className={`rounded-2xl border p-4 transition ${hidden ? "border-dashed border-[#777]/50 bg-black/25" : unlocked ? "border-[#f0c040]/60 bg-[#2c2108] shadow-[0_0_20px_rgba(240,192,64,0.10)]" : "border-[#5f4618]/40 bg-black/25 opacity-55 grayscale"}`}><div className="flex items-center justify-between gap-3"><div className="font-bold text-[#e8d5a3]">{name}</div>{unlocked ? <StatusPill tone="gold">✓</StatusPill> : <Lock className="h-4 w-4 text-[#8a7a55]" />}</div><div className="mt-1 text-xs text-[#c6ad72]">{desc}</div></div>)}</div></Card>)}<PromiseMini /></div>;
+  return <div className="space-y-4">{deriveAchievements(save).map((group) => <Card key={group.name}><SectionTitle icon={Award}>{group.name}</SectionTitle><div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">{group.items.map(([name, desc, unlocked, hidden], idx) => <div key={`${name}-${idx}`} className={`rounded-2xl border p-4 transition ${hidden ? "border-dashed border-[#777]/50 bg-black/25" : unlocked ? "border-[#f0c040]/60 bg-[#2c2108] shadow-[0_0_20px_rgba(240,192,64,0.10)]" : "border-[#5f4618]/40 bg-black/25 opacity-55 grayscale"}`}><div className="flex items-center justify-between gap-3"><div className="font-bold text-[#e8d5a3]">{name}</div>{unlocked ? <StatusPill tone="gold">✓</StatusPill> : <Lock className="h-4 w-4 text-[#8a7a55]" />}</div><div className="mt-1 text-xs text-[#c6ad72]">{desc}</div></div>)}</div></Card>)}<PromiseMini save={save} /></div>;
 }
 
-function PromiseMini() {
-  return <div className="rounded-3xl border border-[#a040f0]/60 bg-[#13091c] p-5 shadow-[0_0_35px_rgba(160,64,240,0.18)]"><div className="flex items-center justify-between gap-3"><div><div className="text-lg font-black text-[#ead7ff]">🤍 A Promise to Shino</div><div className="text-xs uppercase tracking-[0.25em] text-[#caa4ff]">Legendary · Hidden · Final</div></div><Lock className="h-5 w-5 text-[#caa4ff]" /></div><div className="mt-3 rounded-2xl border border-[#a040f0]/40 bg-black/30 p-4 text-sm italic text-[#ead7ff]">A promise made and upheld, complete through discipline and will, but most importantly, through pure love.</div></div>;
+function PromiseMini({ save }) {
+  const promise = save.promise || TEMPLATE_SAVE.promise;
+  return <div className="rounded-3xl border border-[#a040f0]/60 bg-[#13091c] p-5 shadow-[0_0_35px_rgba(160,64,240,0.18)]"><div className="flex items-center justify-between gap-3"><div><div className="text-lg font-black text-[#ead7ff]">🤍 {promise.title}</div><div className="text-xs uppercase tracking-[0.25em] text-[#caa4ff]">{promise.subtitle}</div></div><Lock className="h-5 w-5 text-[#caa4ff]" /></div><div className="mt-3 rounded-2xl border border-[#a040f0]/40 bg-black/30 p-4 text-sm italic text-[#ead7ff]">{promise.flavor}</div></div>;
 }
 
 function LevelsTab({ levelInfo, totalXp }) {
@@ -557,8 +823,8 @@ function TitlesTab({ save, totalXp }) {
 
 function DataTab({ save, setSave }) {
   const [importText, setImportText] = useState("");
-  const [claudeText, setClaudeText] = useState("");
   const [status, setStatus] = useState("");
+  const fileInputRef = useRef(null);
 
   const exportSave = () => {
     const blob = new Blob([JSON.stringify(save, null, 2)], { type: "application/json" });
@@ -570,37 +836,48 @@ function DataTab({ save, setSave }) {
     URL.revokeObjectURL(url);
   };
 
-  const importJson = () => {
+  const importFromText = () => {
     try {
-      const parsed = normalizeSave(JSON.parse(importText));
+      const parsed = parseImportedText(importText, save);
       writeSave(parsed);
       setSave(parsed);
       setImportText("");
-      setStatus("JSON imported successfully.");
-    } catch {
-      setStatus("JSON import failed. The text was not valid JSON.");
+      setStatus("Import successful. The file/text was loaded into local browser storage.");
+    } catch (error) {
+      setStatus(`Import failed: ${error.message || "The text could not be parsed."}`);
     }
   };
 
-  const importClaude = () => {
-    const parsed = parseClaudeSaveFile(claudeText, save);
-    writeSave(parsed);
-    setSave(parsed);
-    setClaudeText("");
-    setStatus("Claude snapshot imported. XP and unlocks are now treated as the baseline.");
+  const importFromFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = parseImportedText(text, save);
+      writeSave(parsed);
+      setSave(parsed);
+      setStatus(`Imported ${file.name} successfully.`);
+    } catch (error) {
+      setStatus(`File import failed: ${error.message || "The file could not be parsed."}`);
+    } finally {
+      event.target.value = "";
+    }
   };
 
-  const resetDemo = () => {
-    writeSave(DEFAULT_SAVE);
-    setSave(DEFAULT_SAVE);
-    setStatus("Reset to May 25 Claude snapshot starter save.");
+  const resetTemplate = () => {
+    if (!window.confirm("Reset the local browser save back to the blank template? Export a backup first if needed.")) return;
+    writeSave(TEMPLATE_SAVE);
+    setSave(TEMPLATE_SAVE);
+    setImportText("");
+    setStatus("Reset to blank template save.");
   };
 
-  return <div className="grid gap-4 lg:grid-cols-2"><Card className="lg:col-span-2"><SectionTitle icon={Upload}>Import Claude Nightly Save</SectionTitle><p className="mb-3 text-sm text-[#c6ad72]">Paste the nightly RANGER SAVE FILE block here. The app treats it as an authoritative snapshot, so it does not need every historical meal from the first 12 days.</p><textarea value={claudeText} onChange={(e) => setClaudeText(e.target.value)} className="min-h-56 w-full rounded-2xl border border-[#8a6a24]/60 bg-black/50 p-4 font-mono text-xs text-[#e8d5a3] outline-none" placeholder="Paste RANGER SAVE FILE text here." /><button onClick={importClaude} disabled={!claudeText.trim()} className="mt-3 rounded-xl border border-[#f0c040]/50 bg-[#3a2a08] px-4 py-2 font-bold text-[#f0c040] disabled:opacity-40">Import Claude Snapshot</button></Card><Card><SectionTitle icon={Download}>Export Save</SectionTitle><p className="text-sm text-[#c6ad72]">Downloads your current browser save as JSON. Back this up before clearing browser data or switching computers.</p><button onClick={exportSave} className="mt-4 rounded-xl border border-[#40c0f0]/50 bg-[#0d2430] px-4 py-2 font-bold text-[#8edbf5]"><Download className="mr-2 inline h-4 w-4" />Export JSON</button></Card><Card><SectionTitle icon={Upload}>Import JSON Save</SectionTitle><textarea value={importText} onChange={(e) => setImportText(e.target.value)} className="min-h-36 w-full rounded-2xl border border-[#8a6a24]/60 bg-black/50 p-4 font-mono text-xs text-[#e8d5a3] outline-none" placeholder="Paste exported JSON here." /><div className="mt-3 flex flex-wrap gap-2"><button onClick={importJson} disabled={!importText.trim()} className="rounded-xl border border-[#f0c040]/50 bg-[#3a2a08] px-4 py-2 font-bold text-[#f0c040] disabled:opacity-40">Import JSON</button><button onClick={resetDemo} className="rounded-xl border border-[#f05050]/50 bg-[#331010] px-4 py-2 font-bold text-[#ff9999]">Reset Starter Save</button></div>{status && <div className="mt-3 text-sm text-[#c6ad72]">{status}</div>}</Card><Card className="lg:col-span-2"><SectionTitle icon={Database}>Current Save Preview</SectionTitle><pre className="max-h-96 overflow-auto rounded-2xl bg-black/50 p-4 text-xs text-[#c6ad72]">{JSON.stringify(save, null, 2)}</pre></Card></div>;
+  return <div className="grid gap-4 lg:grid-cols-2"><Card className="lg:col-span-2"><SectionTitle icon={Upload}>Import Save Text or File</SectionTitle><p className="mb-3 text-sm text-[#c6ad72]">Paste a Claude nightly save block or exported JSON here. The importer tries JSON first, then falls back to the regular text snapshot format.</p><textarea value={importText} onChange={(e) => setImportText(e.target.value)} className="min-h-56 w-full rounded-2xl border border-[#8a6a24]/60 bg-black/50 p-4 font-mono text-xs text-[#e8d5a3] outline-none" placeholder="Paste JSON or regular RANGER SAVE FILE text here." /><div className="mt-3 flex flex-wrap gap-2"><button onClick={importFromText} disabled={!importText.trim()} className="rounded-xl border border-[#f0c040]/50 bg-[#3a2a08] px-4 py-2 font-bold text-[#f0c040] disabled:opacity-40">Import Pasted Text</button><button onClick={() => fileInputRef.current?.click()} className="rounded-xl border border-[#40c0f0]/50 bg-[#0d2430] px-4 py-2 font-bold text-[#8edbf5]"><Upload className="mr-2 inline h-4 w-4" />Import File</button><input ref={fileInputRef} type="file" accept=".json,.txt,.md,text/plain,application/json" className="hidden" onChange={importFromFile} /></div>{status && <div className="mt-3 rounded-xl border border-[#8a6a24]/40 bg-black/30 p-3 text-sm text-[#c6ad72]">{status}</div>}</Card><Card><SectionTitle icon={Download}>Export JSON Backup</SectionTitle><p className="text-sm text-[#c6ad72]">Downloads your current local save as JSON. Keep this outside the GitHub repo.</p><button onClick={exportSave} className="mt-4 rounded-xl border border-[#40c0f0]/50 bg-[#0d2430] px-4 py-2 font-bold text-[#8edbf5]"><Download className="mr-2 inline h-4 w-4" />Export JSON</button></Card><Card><SectionTitle icon={Database}>Template Controls</SectionTitle><p className="text-sm text-[#c6ad72]">This app code is safe to publish as a blank template. Your personal save should be imported only into browser storage.</p><button onClick={resetTemplate} className="mt-4 rounded-xl border border-[#f05050]/50 bg-[#331010] px-4 py-2 font-bold text-[#ff9999]">Reset Local Save to Template</button></Card><Card className="lg:col-span-2"><SectionTitle icon={Database}>Current Local Save Preview</SectionTitle><pre className="max-h-96 overflow-auto rounded-2xl bg-black/50 p-4 text-xs text-[#c6ad72]">{JSON.stringify(save, null, 2)}</pre></Card></div>;
 }
 
-function PromiseTab() {
-  return <div className="flex min-h-[620px] items-center justify-center p-3"><style>{`@keyframes promiseGlow{0%{box-shadow:0 0 24px rgba(160,64,240,.25),inset 0 0 18px rgba(255,255,255,.05);border-color:#a040f0}33%{box-shadow:0 0 38px rgba(255,255,255,.28),inset 0 0 22px rgba(160,64,240,.12);border-color:#fff}66%{box-shadow:0 0 38px rgba(64,192,240,.25),inset 0 0 20px rgba(64,192,240,.10);border-color:#40c0f0}100%{box-shadow:0 0 24px rgba(160,64,240,.25),inset 0 0 18px rgba(255,255,255,.05);border-color:#a040f0}}`}</style><motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="relative w-full max-w-3xl overflow-hidden rounded-[2rem] border-2 bg-[#0b0711] p-8 text-center" style={{ animation: "promiseGlow 4s infinite" }}><div className="absolute left-4 top-4 text-2xl text-[#caa4ff]">✦</div><div className="absolute right-4 top-4 text-2xl text-[#caa4ff]">✦</div><div className="absolute bottom-4 left-4 text-2xl text-[#caa4ff]">✦</div><div className="absolute bottom-4 right-4 text-2xl text-[#caa4ff]">✦</div><motion.div animate={{ y: [0, -4, 0] }} transition={{ duration: 3, repeat: Infinity }} className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-[#caa4ff]/50 bg-[#1b0d29] text-4xl">🤍</motion.div><div className="mt-5 text-xs uppercase tracking-[0.35em] text-[#caa4ff]">Legendary · Hidden · Final</div><div className="mt-3 text-4xl font-black text-white">A Promise to Shino</div><div className="mt-2 text-[#caa4ff]">The final achievement of The Ranger's journey</div><div className="mx-auto my-6 h-px w-2/3 bg-gradient-to-r from-transparent via-[#caa4ff] to-transparent" /><div className="rounded-3xl border border-[#a040f0]/40 bg-black/35 p-6 text-lg italic leading-relaxed text-[#ead7ff]">“A promise made and upheld, complete through discipline and will, but most importantly, through pure love.”</div><div className="mt-6 grid gap-3 text-left md:grid-cols-2">{["All achievements completed", "All titles earned", "180 lbs reached", "Proven by the person you became"].map((item) => <div key={item} className="rounded-2xl border border-[#a040f0]/35 bg-[#160b22] p-4 text-[#ead7ff]">🔒 {item}</div>)}</div><div className="mt-6 rounded-2xl border border-white/15 bg-white/5 p-4 text-sm text-[#d8c6ef]">Made on May 21, 2026 · By The Ranger · For Shino</div></motion.div></div>;
+function PromiseTab({ save }) {
+  const promise = save.promise || TEMPLATE_SAVE.promise;
+  return <div className="flex min-h-[620px] items-center justify-center p-3"><style>{`@keyframes promiseGlow{0%{box-shadow:0 0 24px rgba(160,64,240,.25),inset 0 0 18px rgba(255,255,255,.05);border-color:#a040f0}33%{box-shadow:0 0 38px rgba(255,255,255,.28),inset 0 0 22px rgba(160,64,240,.12);border-color:#fff}66%{box-shadow:0 0 38px rgba(64,192,240,.25),inset 0 0 20px rgba(64,192,240,.10);border-color:#40c0f0}100%{box-shadow:0 0 24px rgba(160,64,240,.25),inset 0 0 18px rgba(255,255,255,.05);border-color:#a040f0}}`}</style><motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }} className="relative w-full max-w-3xl overflow-hidden rounded-[2rem] border-2 bg-[#0b0711] p-8 text-center" style={{ animation: "promiseGlow 4s infinite" }}><div className="absolute left-4 top-4 text-2xl text-[#caa4ff]">✦</div><div className="absolute right-4 top-4 text-2xl text-[#caa4ff]">✦</div><div className="absolute bottom-4 left-4 text-2xl text-[#caa4ff]">✦</div><div className="absolute bottom-4 right-4 text-2xl text-[#caa4ff]">✦</div><motion.div animate={{ y: [0, -4, 0] }} transition={{ duration: 3, repeat: Infinity }} className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-[#caa4ff]/50 bg-[#1b0d29] text-4xl">🤍</motion.div><div className="mt-5 text-xs uppercase tracking-[0.35em] text-[#caa4ff]">{promise.subtitle}</div><div className="mt-3 text-4xl font-black text-white">{promise.title}</div><div className="mt-2 text-[#caa4ff]">The final achievement of The Ranger's journey</div><div className="mx-auto my-6 h-px w-2/3 bg-gradient-to-r from-transparent via-[#caa4ff] to-transparent" /><div className="rounded-3xl border border-[#a040f0]/40 bg-black/35 p-6 text-lg italic leading-relaxed text-[#ead7ff]">“{promise.flavor}”</div><div className="mt-6 grid gap-3 text-left md:grid-cols-2">{["All achievements completed", "All titles earned", "Goal weight reached", "Proven by the person you became"].map((item) => <div key={item} className="rounded-2xl border border-[#a040f0]/35 bg-[#160b22] p-4 text-[#ead7ff]">🔒 {item}</div>)}</div><div className="mt-6 rounded-2xl border border-white/15 bg-white/5 p-4 text-sm text-[#d8c6ef]">{promise.made ? `Made on ${promise.made}` : "Made date locked"} · By {promise.by || "The Ranger"}{promise.for ? ` · For ${promise.for}` : ""}</div></motion.div></div>;
 }
 
 export default function RangerLogRPGWidget() {
@@ -612,5 +889,5 @@ export default function RangerLogRPGWidget() {
   const daily = useMemo(() => dayXp(today), [today]);
   const cw = currentWeight(save, today);
 
-  return <div className="min-h-screen bg-[#0a0a0f] p-4 font-sans text-[#e8d5a3] md:p-6"><div className="mx-auto max-w-7xl"><div className="mb-5 overflow-hidden rounded-[2rem] border border-[#8a6a24]/60 bg-[radial-gradient(circle_at_top_left,rgba(240,192,64,0.18),transparent_32%),linear-gradient(135deg,#15110d,#0a0a0f)] p-5 shadow-[0_0_45px_rgba(240,192,64,0.12)]"><div className="flex flex-wrap items-center justify-between gap-4"><div><div className="text-xs uppercase tracking-[0.35em] text-[#c6ad72]">Ranger Log System · Local Save V2</div><h1 className="mt-1 text-3xl font-black text-[#f0c040] md:text-5xl">⚔️ The Ranger's Log</h1><p className="mt-2 max-w-3xl text-sm leading-relaxed text-[#d8c28b]">Day {save.meta.currentDay} · Snapshot {formatDate(save.meta.lastUpdated)} · Local-first tracker with Claude snapshot import, Quick Log parsing, food presets, XP, achievements, titles, and weight milestones.</p></div><div className="rounded-2xl border border-[#f0c040]/40 bg-black/35 p-4 text-right"><div className="text-sm text-[#c6ad72]">Current Weight</div><div className="text-3xl font-black text-[#f0c040]">{cw} lbs</div><div className="text-xs text-[#c6ad72]">Goal: {save.profile.goalWeight} lbs</div></div></div></div><div className="mb-5 flex gap-2 overflow-x-auto rounded-2xl border border-[#8a6a24]/40 bg-[#110d0a] p-2">{tabs.map(([id, label, Icon]) => <button key={id} onClick={() => setActive(id)} className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition ${active === id ? "bg-[#3a2a08] text-[#f0c040] shadow-[0_0_18px_rgba(240,192,64,0.16)]" : "text-[#c6ad72] hover:bg-black/35 hover:text-[#e8d5a3]"}`}><Icon className="h-4 w-4" />{label}</button>)}</div><motion.div key={active} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}>{active === "character" && <CharacterTab save={save} today={today} levelInfo={levelInfo} daily={daily} totalXp={totalXp} />}{active === "quick" && <QuickLogTab save={save} setSave={setSave} />}{active === "quests" && <QuestsTab today={today} save={save} />}{active === "achievements" && <AchievementsTab save={save} />}{active === "levels" && <LevelsTab levelInfo={levelInfo} totalXp={totalXp} />}{active === "titles" && <TitlesTab save={save} totalXp={totalXp} />}{active === "data" && <DataTab save={save} setSave={setSave} />}{active === "promise" && <PromiseTab />}</motion.div></div></div>;
+  return <div className="min-h-screen bg-[#0a0a0f] p-4 font-sans text-[#e8d5a3] md:p-6"><div className="mx-auto max-w-7xl"><div className="mb-5 overflow-hidden rounded-[2rem] border border-[#8a6a24]/60 bg-[radial-gradient(circle_at_top_left,rgba(240,192,64,0.18),transparent_32%),linear-gradient(135deg,#15110d,#0a0a0f)] p-5 shadow-[0_0_45px_rgba(240,192,64,0.12)]"><div className="flex flex-wrap items-center justify-between gap-4"><div><div className="text-xs uppercase tracking-[0.35em] text-[#c6ad72]">Ranger Log System · Template Build</div><h1 className="mt-1 text-3xl font-black text-[#f0c040] md:text-5xl">⚔️ The Ranger's Log</h1><p className="mt-2 max-w-3xl text-sm leading-relaxed text-[#d8c28b]">Day {save.meta.currentDay} · Snapshot {formatDate(save.meta.lastUpdated)} · Local-first tracker with text/JSON import, Quick Log parsing, food presets, XP, achievements, titles, and weight milestones.</p></div><div className="rounded-2xl border border-[#f0c040]/40 bg-black/35 p-4 text-right"><div className="text-sm text-[#c6ad72]">Current Weight</div><div className="text-3xl font-black text-[#f0c040]">{cw !== null ? `${cw} lbs` : "Not imported"}</div><div className="text-xs text-[#c6ad72]">Goal: {save.profile.goalWeight !== null ? `${save.profile.goalWeight} lbs` : "Not imported"}</div></div></div></div><div className="mb-5 flex gap-2 overflow-x-auto rounded-2xl border border-[#8a6a24]/40 bg-[#110d0a] p-2">{tabs.map(([id, label, Icon]) => <button key={id} onClick={() => setActive(id)} className={`flex shrink-0 items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition ${active === id ? "bg-[#3a2a08] text-[#f0c040] shadow-[0_0_18px_rgba(240,192,64,0.16)]" : "text-[#c6ad72] hover:bg-black/35 hover:text-[#e8d5a3]"}`}><Icon className="h-4 w-4" />{label}</button>)}</div><motion.div key={active} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }}>{active === "character" && <CharacterTab save={save} today={today} levelInfo={levelInfo} daily={daily} totalXp={totalXp} />}{active === "quick" && <QuickLogTab save={save} setSave={setSave} />}{active === "quests" && <QuestsTab today={today} save={save} />}{active === "achievements" && <AchievementsTab save={save} />}{active === "levels" && <LevelsTab levelInfo={levelInfo} totalXp={totalXp} />}{active === "titles" && <TitlesTab save={save} totalXp={totalXp} />}{active === "data" && <DataTab save={save} setSave={setSave} />}{active === "promise" && <PromiseTab save={save} />}</motion.div></div></div>;
 }
